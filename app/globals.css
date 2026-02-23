@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  /* LifeOS brand */
+  --lifeos-pink: #d96c7d;
+  --lifeos-pink-2: #d86b7c;
+  --lifeos-cream: #fff7f9;
+  --lifeos-card: #ffffff;
+  --lifeos-ink: #111114;
+  --lifeos-muted: rgba(17, 17, 20, 0.6);
+  --lifeos-border: rgba(17, 17, 20, 0.12);
+  --lifeos-border-soft: rgba(17, 17, 20, 0.08);
+
+  /* App defaults */
+  --background: #ffffff;
+  --foreground: var(--lifeos-ink);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Keep LifeOS consistent for now */
+    --background: #ffffff;
+    --foreground: var(--lifeos-ink);
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: ui-rounded, system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
+    Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+/* Crisp text rendering */
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* App-wide focus style (keyboard accessible) */
+:focus-visible {
+  outline: 2px solid var(--lifeos-pink);
+  outline-offset: 2px;
+}
+
+/* Prevent mobile overscroll rubber-band from revealing background gaps */
+html,
+body {
+  height: 100%;
+}

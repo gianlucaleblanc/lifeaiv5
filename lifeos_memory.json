@@ -1,0 +1,231 @@
+{
+  "meta": {
+    "lastUsedDate": "2026-02-03",
+    "streak": 1,
+    "profileUpdatedAt": "2026-02-03T17:49:01.509Z"
+  },
+  "profile": {
+    "summary": "You tend to struggle with procrastination, especially when facing deadlines like your essay. You often find yourself overwhelmed by the day, leading to unhealthy choices and inactivity, particularly in the mornings.",
+    "doMore": [
+      "Set specific time blocks for essay work before class",
+      "Incorporate a quick workout routine immediately after waking up",
+      "Plan meals in advance to avoid junk food"
+    ],
+    "doLess": [
+      "Delay starting tasks until you feel motivated",
+      "Skip workouts due to feeling overwhelmed",
+      "Overthink your meal choices"
+    ],
+    "risk": "You may end up feeling unproductive and resorting to unhealthy habits if you don't establish a clear plan for the day."
+  },
+  "entries": [
+    {
+      "createdAt": "2026-02-03T18:04:38.838Z",
+      "input": "I have class until 2pm, an essay due Friday, I want to work out, and I’ve been procrastinating. I also need groceries.",
+      "output": {
+        "priorities": [
+          "Complete essay outline before class",
+          "Incorporate a quick workout after waking up",
+          "Plan meals and grocery list for the week"
+        ],
+        "schedule": [
+          {
+            "time": "Morning",
+            "plan": [
+              "Wake up 15 minutes earlier for a quick workout",
+              "Spend 20 minutes outlining essay before class"
+            ]
+          },
+          {
+            "time": "Afternoon",
+            "plan": [
+              "Attend class until 2pm",
+              "Spend 30 minutes on essay after class"
+            ]
+          },
+          {
+            "time": "Evening",
+            "plan": [
+              "Go grocery shopping",
+              "Prepare healthy meals for the week"
+            ]
+          }
+        ],
+        "habit": {
+          "title": "Morning Workout",
+          "why": "Kickstarts your energy and sets a positive tone for the day.",
+          "how": "Do a quick 10-minute workout right after you wake up."
+        },
+        "coach": "Stop overthinking and start doing.",
+        "personalInsight": "Your tendency to procrastinate may lead to unhealthy habits if you don't take charge of your mornings."
+      }
+    },
+    {
+      "createdAt": "2026-02-03T19:41:49.321Z",
+      "input": "I have class until 2pm, an essay due Friday, I want to work out, and I’ve been procrastinating. I also need groceries.",
+      "output": {
+        "priorities": [
+          "Work on essay for 30 minutes before class",
+          "Incorporate a 10-minute workout after waking up",
+          "Plan and prep healthy meals for the week"
+        ],
+        "schedule": [
+          {
+            "time": "Morning",
+            "plan": [
+              "Wake up and do a quick 10-minute workout",
+              "Have a healthy breakfast while reviewing essay notes"
+            ]
+          },
+          {
+            "time": "Afternoon",
+            "plan": [
+              "Attend class until 2pm",
+              "Spend 30 minutes on essay work immediately after class"
+            ]
+          },
+          {
+            "time": "Evening",
+            "plan": [
+              "Go grocery shopping for healthy meal prep",
+              "Spend 15 minutes planning meals for the week"
+            ]
+          }
+        ],
+        "habit": {
+          "title": "Morning Workout",
+          "why": "It kickstarts your day and boosts your energy, helping combat procrastination.",
+          "how": "Choose a quick 10-minute workout routine you can do at home, like bodyweight exercises."
+        },
+        "coach": "Stop waiting for motivation and start making progress.",
+        "personalInsight": "You often find yourself overwhelmed, which leads to procrastination—let’s break that cycle today."
+      }
+    },
+    {
+      "createdAt": "2026-02-03T20:20:52.876Z",
+      "input": "I have class until 2pm, an essay due Friday, I want to work out, and I’ve been procrastinating. I also need groceries.",
+      "output": {
+        "priorities": [
+          "Work on essay for 30 minutes before class",
+          "Complete a quick workout after waking up",
+          "Plan and prepare healthy meals for the week"
+        ],
+        "schedule": [
+          {
+            "time": "Morning",
+            "plan": [
+              "Wake up and do a 10-minute workout",
+              "Spend 30 minutes on essay outline before class"
+            ]
+          },
+          {
+            "time": "Afternoon",
+            "plan": [
+              "Attend class until 2pm",
+              "Spend 30 minutes on essay after class"
+            ]
+          },
+          {
+            "time": "Evening",
+            "plan": [
+              "Go grocery shopping for healthy meals",
+              "Prepare meals for the week"
+            ]
+          }
+        ],
+        "habit": {
+          "title": "Morning Movement",
+          "why": "Starting your day with movement boosts energy and sets a positive tone.",
+          "how": "Do a quick 10-minute workout right after waking up."
+        },
+        "coach": "Stop thinking, start doing.",
+        "personalInsight": "You often procrastinate when feeling overwhelmed, so tackling tasks in small, manageable chunks will help you stay productive."
+      }
+    },
+    {
+      "createdAt": "2026-02-03T20:54:17.936Z",
+      "input": "I have class until 2pm, an essay due Friday, I want to work out, and I’ve been procrastinating. I also need groceries.",
+      "output": {
+        "priorities": [
+          "Work on essay for 30 minutes before class",
+          "Incorporate a 10-minute workout after waking up",
+          "Plan and prepare healthy meals for the week"
+        ],
+        "schedule": [
+          {
+            "time": "Morning",
+            "plan": [
+              "Wake up and do a 10-minute workout",
+              "Have a healthy breakfast"
+            ]
+          },
+          {
+            "time": "Afternoon",
+            "plan": [
+              "Attend class until 2pm",
+              "Spend 30 minutes on essay after class"
+            ]
+          },
+          {
+            "time": "Evening",
+            "plan": [
+              "Go grocery shopping",
+              "Prepare meals for the week"
+            ]
+          }
+        ],
+        "habit": {
+          "title": "Morning Movement",
+          "why": "To boost energy and reduce feelings of overwhelm.",
+          "how": "Do a quick 10-minute bodyweight workout right after waking up."
+        },
+        "coach": "Stop overthinking; just start moving.",
+        "personalInsight": "Your tendency to procrastinate can be countered by structured time blocks for focused work."
+      }
+    },
+    {
+      "createdAt": "2026-02-03T20:55:03.490Z",
+      "input": "I have to run at some point today and I have to go to sleep by 9.",
+      "output": {
+        "priorities": [
+          "Work on essay for 30 minutes before class",
+          "Complete a quick workout right after waking up",
+          "Plan and prep meals for the day"
+        ],
+        "schedule": [
+          {
+            "time": "Morning",
+            "plan": [
+              "Wake up and do a 10-minute workout",
+              "Eat a healthy breakfast",
+              "Spend 30 minutes working on the essay"
+            ]
+          },
+          {
+            "time": "Afternoon",
+            "plan": [
+              "Attend class",
+              "Take a 10-minute break to stretch and move",
+              "Prep lunch and dinner to avoid unhealthy choices"
+            ]
+          },
+          {
+            "time": "Evening",
+            "plan": [
+              "Finish any remaining essay work for 20 minutes",
+              "Enjoy a healthy dinner",
+              "Relax and wind down before bed"
+            ]
+          }
+        ],
+        "habit": {
+          "title": "Morning Workout",
+          "why": "Starting your day active helps reduce feelings of overwhelm and boosts energy.",
+          "how": "Commit to a 10-minute workout each morning right after waking up."
+        },
+        "coach": "Stop overthinking and start doing—your future self will thank you.",
+        "personalInsight": "Your tendency to procrastinate can be tackled by establishing a structured morning routine."
+      }
+    }
+  ]
+}
