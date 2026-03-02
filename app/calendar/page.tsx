@@ -16,7 +16,7 @@ function pad2(n: number) {
 
 function generateId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return generateId();
+    return crypto.randomUUID();
   }
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
@@ -188,14 +188,19 @@ function findNextFree(
 
 export default function CalendarPage() {
   const [cursor, setCursor] = useState(() => {
-    // Persist calendar cursor so after importing a syllabus (semester dates) the view can
-    // jump to the relevant week instead of staying on "today".
+    // Always open on the current week by default.
+    // Only jump to the syllabus-import cursor if the user came directly from importing
+    // (detected by a sessionStorage flag set during import).
     if (typeof window === "undefined") return new Date();
     try {
-      const raw = window.localStorage.getItem("lifeos_calendar_cursor_v1");
-      if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-        const d = new Date(`${raw}T12:00:00`);
-        if (!Number.isNaN(d.getTime())) return d;
+      const jumpFlag = window.sessionStorage.getItem("lifeos_calendar_jump_v1");
+      if (jumpFlag === "1") {
+        window.sessionStorage.removeItem("lifeos_calendar_jump_v1");
+        const raw = window.localStorage.getItem("lifeos_calendar_cursor_v1");
+        if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+          const d = new Date(`${raw}T12:00:00`);
+          if (!Number.isNaN(d.getTime())) return d;
+        }
       }
     } catch {
       // ignore
@@ -226,25 +231,21 @@ export default function CalendarPage() {
   } | null>(null);
 
   const startHour = 6;
-  // Show the full day down to midnight (24:00) so late events are visible.
   const endHour = 24;
   const stepMin = 10;
-  const hourRowPx = 72; // height per hour row in px
-  // Grid height must be EXACTLY (endHour - startHour) * hourRowPx so that
-  // minuteTopPct() percentages line up perfectly with the hour-divider rows.
-  // Do NOT add +1 here — the +1 was causing every block to render ~1 row too high.
+  const hourRowPx = 56; // tighter rows so more hours fit without vertical scroll
   const gridHeightPx = (endHour - startHour) * hourRowPx;
 
-  // Wider columns so titles don't collide. (We still truncate to guarantee no overflow.)
-  const timeColPx = 84;
-  // Make the calendar wider so blocks have enough room for readable titles.
-  const dayColMinPx = 260;
+  // Narrow time column so day columns get maximum width
+  const timeColPx = 48;
+  // No minimum — let columns be exactly 1fr so all 7 fit without horizontal scroll
+  const dayColMinPx = 0;
 
   useEffect(() => {
     setItems(loadCalendar());
     // Set today's ISO date client-side only — avoids server/client hydration mismatch
     // that would occur from calling new Date() during render.
-    setTodayISO(todayISO);
+    setTodayISO(isoDateLocal(new Date()));
   }, []);
 
   useEffect(() => {
@@ -289,9 +290,10 @@ export default function CalendarPage() {
     if (!scrollEl || !gridEl) return null;
     const r = scrollEl.getBoundingClientRect();
 
-    // Account for horizontal scroll.
-    const x = clamp(clientX - r.left + scrollEl.scrollLeft - timeColPx, 0, gridEl.scrollWidth - timeColPx - 1);
-    const colW = (gridEl.scrollWidth - timeColPx) / 7;
+    // Use offsetWidth — no horizontal scroll, columns fill viewport width.
+    const gridW = gridEl.offsetWidth;
+    const x = clamp(clientX - r.left - timeColPx, 0, gridW - timeColPx - 1);
+    const colW = (gridW - timeColPx) / 7;
     const dayIdx = clamp(Math.floor(x / colW), 0, 6);
     const date = isoDateLocal(days[dayIdx]);
 
@@ -439,115 +441,116 @@ export default function CalendarPage() {
 
   return (
     <div className="w-full">
-      <div className="w-full grid gap-10 lg:grid-cols-[320px_1fr]">
-      <aside className="hidden lg:block">
-        <div className="rounded-2xl border border-[var(--lifeos-border-soft)] bg-white p-5">
-          <div className="text-sm font-semibold text-black/70">{formatHeader(cursor)}</div>
-          <div className="mt-4 grid grid-cols-7 gap-2 text-center text-xs text-black/60">
-            {Array.from({ length: 7 }).map((_, i) => (
-              <div key={i}>{["M", "T", "W", "T", "F", "S", "S"][i]}</div>
-            ))}
-          </div>
-          <div className="mt-2 grid grid-cols-7 gap-2">
-            {(() => {
-              const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
-              const start = startOfWeek(first);
-              return Array.from({ length: 42 }, (_, i) => {
-                const d = new Date(start);
-                d.setDate(d.getDate() + i);
-                const iso = isoDateLocal(d);
-                const isThisMonth = d.getMonth() === cursor.getMonth();
-                const isToday = iso === todayISO;
+      <div className="w-full grid gap-6 lg:grid-cols-[220px_1fr]">
 
-                return (
-                  <button
-                    key={iso}
-                    onClick={() => setCursor(d)}
-                    className={
-                      "h-8 rounded-lg text-xs font-semibold transition " +
-                      (isToday
-                        ? "bg-[var(--lifeos-pink)] text-white"
-                        : isThisMonth
-                          ? "bg-black/[0.03] text-black/80 hover:bg-black/[0.06]"
-                          : "text-black/30")
-                    }
-                    aria-label={iso}
-                  >
-                    {d.getDate()}
-                  </button>
-                );
-              });
-            })()}
-          </div>
+        {/* ── Mini calendar sidebar ── */}
+        <aside className="hidden lg:block space-y-4">
+          <div className="rounded-2xl bg-white border border-black/[0.06] p-5">
 
-          <div className="mt-5 grid grid-cols-3 gap-2">
-            <button
-              onClick={() => {
-                const d = new Date(cursor);
-                d.setMonth(d.getMonth() - 1);
-                setCursor(d);
-              }}
-              className="w-full rounded-full border border-[var(--lifeos-border-soft)] bg-white px-0 py-2 text-xs font-semibold text-black/70"
-            >
-              Prev
-            </button>
-            <button
-              onClick={() => setCursor(new Date())}
-              className="w-full rounded-full border border-[var(--lifeos-border-soft)] bg-white px-0 py-2 text-xs font-semibold text-black/70"
-            >
-              Today
-            </button>
-            <button
-              onClick={() => {
-                const d = new Date(cursor);
-                d.setMonth(d.getMonth() + 1);
-                setCursor(d);
-              }}
-              className="w-full rounded-full border border-[var(--lifeos-border-soft)] bg-white px-0 py-2 text-xs font-semibold text-black/70"
-            >
-              Next
-            </button>
-          </div>
+            {/* Month header */}
+            <div className="text-sm font-extrabold text-black" style={{ letterSpacing: "-0.02em" }}>{formatHeader(cursor)}</div>
 
-          <div className="mt-6 text-xs text-black/60">
-            Tip: generate a plan, then tap <span className="font-semibold">Add to Calendar</span>.
-            <div className="mt-2">You can also double‑click to add a block.</div>
-          </div>
-        </div>
-      </aside>
+            {/* Weekday labels */}
+            <div className="mt-4 grid grid-cols-7 gap-1 text-center">
+              {["M","T","W","T","F","S","S"].map((d, i) => (
+                <div key={i} className="text-[10px] font-bold text-black/30">{d}</div>
+              ))}
+            </div>
 
-      <section>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-black/50">Calendar</div>
-            <div className="mt-1 text-2xl font-extrabold text-black" style={{ letterSpacing: "-0.02em" }}>
-              Week
+            {/* Day cells */}
+            <div className="mt-1 grid grid-cols-7 gap-1">
+              {(() => {
+                const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+                const start = startOfWeek(first);
+                return Array.from({ length: 42 }, (_, i) => {
+                  const d = new Date(start);
+                  d.setDate(d.getDate() + i);
+                  const iso = isoDateLocal(d);
+                  const isThisMonth = d.getMonth() === cursor.getMonth();
+                  const isToday = iso === todayISO;
+                  const isInWeek = inWeek.has(iso);
+                  return (
+                    <button
+                      key={iso}
+                      onClick={() => setCursor(d)}
+                      className={
+                        "h-7 rounded-lg text-[11px] font-semibold transition-all " +
+                        (isToday
+                          ? "bg-[var(--lifeos-pink)] text-white shadow-[0_2px_8px_rgba(255,107,107,0.35)]"
+                          : isInWeek && isThisMonth
+                            ? "bg-[var(--lifeos-pink)]/10 text-[var(--lifeos-pink)] font-bold"
+                            : isThisMonth
+                              ? "hover:bg-black/[0.05] text-black/70"
+                              : "text-black/20")
+                      }
+                      aria-label={iso}
+                    >
+                      {d.getDate()}
+                    </button>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Month nav */}
+            <div className="mt-4 grid grid-cols-3 gap-1.5">
+              <button
+                onClick={() => { const d = new Date(cursor); d.setMonth(d.getMonth() - 1); setCursor(d); }}
+                className="rounded-xl border border-black/[0.07] bg-white py-2 text-xs font-bold text-black/50 hover:bg-black/[0.04] transition-colors"
+              >← Prev</button>
+              <button
+                onClick={() => setCursor(new Date())}
+                className="rounded-xl bg-[var(--lifeos-pink)] py-2 text-xs font-bold text-white"
+              >Today</button>
+              <button
+                onClick={() => { const d = new Date(cursor); d.setMonth(d.getMonth() + 1); setCursor(d); }}
+                className="rounded-xl border border-black/[0.07] bg-white py-2 text-xs font-bold text-black/50 hover:bg-black/[0.04] transition-colors"
+              >Next →</button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                const d = new Date(cursor);
-                d.setDate(d.getDate() - 7);
-                setCursor(d);
-              }}
-              className="rounded-full border border-[var(--lifeos-border-soft)] bg-white px-4 py-2 text-sm font-semibold text-black/70"
-            >
-              ←
-            </button>
-            <button
-              onClick={() => {
-                const d = new Date(cursor);
-                d.setDate(d.getDate() + 7);
-                setCursor(d);
-              }}
-              className="rounded-full border border-[var(--lifeos-border-soft)] bg-white px-4 py-2 text-sm font-semibold text-black/70"
-            >
-              →
-            </button>
+          {/* Tips */}
+          <div className="rounded-2xl bg-white border border-black/[0.06] p-5">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-black/30 mb-2">Tips</div>
+            <ul className="space-y-2">
+              {[
+                "Generate a plan, then tap Add to Calendar.",
+                "Double-click any slot to create a block.",
+                "Drag blocks to reschedule them.",
+              ].map((tip, i) => (
+                <li key={i} className="flex items-start gap-2 text-xs text-black/50">
+                  <span className="text-[var(--lifeos-pink)] flex-shrink-0">✦</span>
+                  {tip}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </aside>
 
-            <div className="ml-2 flex items-center gap-2">
+        {/* ── Main calendar section ── */}
+        <section>
+
+          {/* Toolbar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-widest text-black/30">Calendar</div>
+              <div className="text-2xl font-extrabold text-black" style={{ letterSpacing: "-0.03em" }}>
+                {formatHeader(cursor)}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Week nav */}
+              <button
+                onClick={() => { const d = new Date(cursor); d.setDate(d.getDate() - 7); setCursor(d); }}
+                className="h-9 w-9 flex items-center justify-center rounded-xl border border-black/[0.08] bg-white text-black/60 hover:bg-black/[0.04] transition-colors font-bold"
+              >←</button>
+              <button
+                onClick={() => { const d = new Date(cursor); d.setDate(d.getDate() + 7); setCursor(d); }}
+                className="h-9 w-9 flex items-center justify-center rounded-xl border border-black/[0.08] bg-white text-black/60 hover:bg-black/[0.04] transition-colors font-bold"
+              >→</button>
+
+              {/* Clear dropdown */}
               <select
                 onChange={(e) => {
                   const v = e.target.value as "" | "day" | "week" | "month" | "all";
@@ -555,11 +558,11 @@ export default function CalendarPage() {
                   clearCalendar(v);
                   e.currentTarget.value = "";
                 }}
-                className="rounded-full border border-[var(--lifeos-border-soft)] bg-white px-4 py-2 text-sm font-semibold text-black/70"
+                className="h-9 rounded-xl border border-black/[0.08] bg-white px-3 text-xs font-bold text-black/50 hover:bg-black/[0.04] transition-colors outline-none cursor-pointer"
                 defaultValue=""
                 aria-label="Clear calendar"
               >
-                <option value="">Clear…</option>
+                <option value="">🗑 Clear…</option>
                 <option value="day">Clear day</option>
                 <option value="week">Clear week</option>
                 <option value="month">Clear month</option>
@@ -567,292 +570,333 @@ export default function CalendarPage() {
               </select>
             </div>
           </div>
-        </div>
 
-        <div className="mt-6 overflow-hidden rounded-2xl border border-[var(--lifeos-border-soft)] bg-white">
-          <div ref={scrollRef} className="overflow-x-auto">
-          <div className="min-w-[1624px]">
-          {/* Header row */}
-          <div
-            className="grid border-b border-[var(--lifeos-border-soft)] bg-black/[0.02]"
-            style={{ gridTemplateColumns: `${timeColPx}px repeat(7, minmax(${dayColMinPx}px, 1fr))` }}
-          >
-            <div className="p-3 text-xs text-black/40"> </div>
-            {days.map((d) => {
-              const iso = isoDateLocal(d);
-              const isToday = iso === todayISO;
-              return (
-                <div key={iso} className="p-3 text-center">
-                  <div className={`text-xs ${isToday ? "text-[var(--lifeos-pink)]" : "text-black/50"}`}>{formatWeekday(d)}</div>
-                  <div className={`text-sm font-semibold ${isToday ? "text-[var(--lifeos-pink)]" : "text-black"}`}>{formatDayLabel(d)}</div>
-                </div>
-              );
-            })}
-          </div>
+          {/* Calendar grid */}
+          <div className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-[0_2px_12px_rgba(0,0,0,0.05)]">
+            <div ref={scrollRef} className="w-full">
 
-          {/* Body */}
-          <div
-            ref={bodyRef}
-            className="grid"
-            style={{ gridTemplateColumns: `${timeColPx}px repeat(7, minmax(${dayColMinPx}px, 1fr))` }}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
-          >
-            {/* time labels */}
-            <div className="relative" style={{ height: gridHeightPx }}>
-              {hours.map((h) => (
-                <div key={h} style={{ height: hourRowPx }} className="px-3 text-[11px] text-black/50">
-                  {pad2(h)}:00
-                </div>
-              ))}
-            </div>
-
-            {days.map((d) => {
-              const date = isoDateLocal(d);
-              const dayBlocks = weekBlocks.filter((b) => b.date === date);
-
-              return (
+                {/* Header row */}
                 <div
-                  key={date}
-                  className="relative border-l border-[var(--lifeos-border-soft)] bg-[var(--lifeos-cream)]"
-                  style={{ height: gridHeightPx }}
-                  onDoubleClick={(e) => onDoubleClickEmpty(e, date)}
-                  onClick={() => setOverflowPopover(null)}
+                  className="grid border-b border-black/[0.05] bg-black/[0.015]"
+                  style={{ gridTemplateColumns: `${timeColPx}px repeat(7, 1fr)` }}
                 >
-                  {/* hour grid */}
-                  {hours.map((h) => (
-                    <div key={h} style={{ height: hourRowPx }} className="border-b border-black/[0.04]" />
-                  ))}
-
-                  {/* blocks — Option B layout:
-                      - Primary block (col=0) renders full-width.
-                      - Overflow siblings (col>0) are hidden; the primary shows a "+N more" badge.
-                      - Clicking the badge opens a small popover listing the hidden blocks.
-                      - Clicking a popover item opens that block's editor. */}
-                  {(() => {
-                    const laid = layoutDayBlocks(dayBlocks);
-                    // Group by their group identity: all blocks with the same
-                    // "group anchor" (the primary block) share a group.
-                    // We identify groups by the primary block's id.
-                    // Build a map: primaryId → overflow siblings
-                    const primaryMap = new Map<string, { primary: LayoutBlock; overflow: LayoutBlock[] }>();
-                    // We need to re-group: blocks with col=0 are primaries,
-                    // blocks with col>0 belong to the most-recent primary that overlaps them.
-                    const primaries: LayoutBlock[] = laid.filter((b) => b.col === 0);
-                    const overflows: LayoutBlock[] = laid.filter((b) => b.col > 0);
-
-                    for (const p of primaries) {
-                      primaryMap.set(p.id, { primary: p, overflow: [] });
-                    }
-                    for (const ov of overflows) {
-                      // Find the primary that this overflow overlaps with
-                      const parent = primaries.find(
-                        (p) => p.startMin < ov.endMin && ov.startMin < p.endMin
-                      );
-                      if (parent && primaryMap.has(parent.id)) {
-                        primaryMap.get(parent.id)!.overflow.push(ov);
-                      }
-                    }
-
-                    return Array.from(primaryMap.values()).map(({ primary: b, overflow }) => {
-                      const topPx    = minuteTopPx(b.startMin, startHour, hourRowPx);
-                      const heightPx = Math.max(24, minuteTopPx(b.endMin, startHour, hourRowPx) - topPx);
-                      const timeLabel = `${minsToHHMM(b.startMin)}–${minsToHHMM(b.endMin)}`;
-                      const short = truncTitle(b.title, 26);
-                      const isPopoverOpen = overflowPopover === b.id;
-
-                      // Color by kind
-                      const kind = b.meta?.kind as string | undefined;
-                      const blockColor =
-                        kind === "prep"       ? "bg-blue-50 ring-blue-200"     :
-                        kind === "follow-up"  ? "bg-green-50 ring-green-200"   :
-                        kind === "travel"     ? "bg-amber-50 ring-amber-200"   :
-                        kind === "reminder"   ? "bg-purple-50 ring-purple-200" :
-                        kind === "buffer"     ? "bg-orange-50 ring-orange-200" :
-                                               "bg-white ring-black/10";
-
-                      return (
-                        <div
-                          key={b.id}
-                          className="absolute"
-                          style={{ top: topPx, height: heightPx, left: 4, right: 4, zIndex: 10 }}
-                        >
-                          {/* Primary block — full width */}
-                          <div
-                            data-block
-                            className={`w-full h-full cursor-grab select-none overflow-hidden rounded-xl p-2 text-left shadow-sm ring-1 active:cursor-grabbing ${blockColor}`}
-                            title={b.meta?.fullDetail ? `${b.title}\n${b.meta.fullDetail}` : b.title}
-                            onPointerDown={(e) => onBlockPointerDown(e, b)}
-                            onClick={() => openEditor(b.id)}
-                          >
-                            <div className="truncate text-xs font-semibold text-black/80 leading-tight">{short}</div>
-                            {heightPx >= 36 && (
-                              <div className="mt-0.5 text-[10px] text-black/40 leading-tight truncate">{timeLabel}</div>
-                            )}
-                          </div>
-
-                          {/* +N more badge — only shown when there are overflow siblings */}
-                          {overflow.length > 0 && (
-                            <button
-                              className="absolute bottom-1 right-1 z-20 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white hover:bg-black transition-colors"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setOverflowPopover(isPopoverOpen ? null : b.id);
-                              }}
-                            >
-                              +{overflow.length}
-                            </button>
-                          )}
-
-                          {/* Overflow popover */}
-                          {isPopoverOpen && (
-                            <div
-                              className="absolute left-0 z-50 mt-1 w-56 rounded-2xl border border-black/10 bg-white shadow-xl overflow-hidden"
-                              style={{ top: "100%" }}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-black/40 border-b border-black/5">
-                                {overflow.length + 1} overlapping events
-                              </div>
-                              {/* Show primary at top too for easy reference */}
-                              {[b, ...overflow].map((ov) => {
-                                const ovKind = ov.meta?.kind as string | undefined;
-                                const dot =
-                                  ovKind === "prep"      ? "bg-blue-400"   :
-                                  ovKind === "follow-up" ? "bg-green-400"  :
-                                  ovKind === "travel"    ? "bg-amber-400"  :
-                                  ovKind === "reminder"  ? "bg-purple-400" :
-                                  ovKind === "buffer"    ? "bg-orange-400" :
-                                                          "bg-black/30";
-                                return (
-                                  <button
-                                    key={ov.id}
-                                    className="flex w-full items-start gap-2 px-3 py-2.5 text-left hover:bg-black/[0.03] transition-colors border-b border-black/5 last:border-b-0"
-                                    onClick={() => { setOverflowPopover(null); openEditor(ov.id); }}
-                                  >
-                                    <span className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full ${dot}`} />
-                                    <div>
-                                      <div className="text-xs font-semibold text-black/80 leading-tight">{ov.title}</div>
-                                      <div className="text-[10px] text-black/40 mt-0.5">{minsToHHMM(ov.startMin)}–{minsToHHMM(ov.endMin)}</div>
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                              <button
-                                className="w-full px-3 py-2 text-[10px] text-black/30 hover:text-black/60 transition-colors text-center"
-                                onClick={() => setOverflowPopover(null)}
-                              >
-                                Close
-                              </button>
-                            </div>
-                          )}
+                  <div className="p-2" />
+                  {days.map((d) => {
+                    const iso = isoDateLocal(d);
+                    const isToday = iso === todayISO;
+                    return (
+                      <div key={iso} className="py-2 px-1 text-center">
+                        <div className={`text-[9px] font-bold uppercase tracking-widest ${isToday ? "text-[var(--lifeos-pink)]" : "text-black/30"}`}>
+                          {formatWeekday(d)}
                         </div>
-                      );
-                    });
-                  })()}
+                        <div className={`mt-0.5 mx-auto inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${isToday ? "bg-[var(--lifeos-pink)] text-white shadow-[0_2px_8px_rgba(255,107,107,0.35)]" : "text-black/70"}`}>
+                          {d.getDate()}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
-          </div>
-          </div>
-          </div>
-        </div>
 
-        {items.length === 0 ? (
-          <div className="mt-6 rounded-2xl border border-[var(--lifeos-border-soft)] bg-white p-5 text-sm text-black/70">
-            Your calendar is empty. Generate a plan, then tap <span className="font-semibold">Add to Calendar</span>.
-          </div>
-        ) : null}
-      </section>
+                {/* ── Deadlines row — shows events with startMin ≥ 23:00 (graded items default to 23:50) ── */}
+                {(() => {
+                  // Threshold: anything at or after 11pm is a "deadline" event, not a timed block.
+                  // storage.ts stores graded items at startMin=1430 (23:50) or startMin=1439 (23:59).
+                  const isDue = (b: CalendarBlock) => b.startMin >= 23 * 60;
+                  const hasDueBlocks = days.some((d) => {
+                    const iso = isoDateLocal(d);
+                    return weekBlocks.some((b) => b.date === iso && isDue(b));
+                  });
+                  if (!hasDueBlocks) return null;
+                  return (
+                    <div
+                      className="grid border-b border-black/[0.07]"
+                      style={{ gridTemplateColumns: `${timeColPx}px repeat(7, 1fr)`, backgroundColor: "rgba(217,108,125,0.06)" }}
+                    >
+                      <div className="flex items-center justify-end pr-1.5 py-1.5">
+                        <span className="text-[9px] font-extrabold text-[var(--lifeos-pink)] uppercase tracking-widest leading-none">Due</span>
+                      </div>
+                      {days.map((d) => {
+                        const iso = isoDateLocal(d);
+                        const dueBlocks = weekBlocks.filter((b) => b.date === iso && isDue(b));
+                        return (
+                          <div key={iso} className="border-l border-black/[0.04] py-1 px-0.5 flex flex-col gap-0.5 min-h-[28px]">
+                            {dueBlocks.map((b) => {
+                              const customColor = (b.meta as any)?.color as string | undefined;
+                              const kind = b.meta?.kind as string | undefined;
+                              const bgColor = customColor
+                                ? `${customColor}22`
+                                : kind === "syllabus" ? "#fce7eb" : "#fef3c7";
+                              const textColor = customColor
+                                ? customColor
+                                : kind === "syllabus" ? "#9d1f35" : "#92400e";
+                              const borderColor = customColor
+                                ? `${customColor}66`
+                                : kind === "syllabus" ? "#f9a8b4" : "#fcd34d";
+                              return (
+                                <button
+                                  key={b.id}
+                                  onClick={() => openEditor(b.id)}
+                                  className="w-full rounded-md px-1.5 py-0.5 text-left truncate"
+                                  style={{ backgroundColor: bgColor, color: textColor, border: `1px solid ${borderColor}`, fontSize: 10, fontWeight: 700, lineHeight: 1.4 }}
+                                  title={b.title}
+                                >
+                                  {truncTitle(b.title, 20)}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
 
-      {/* Edit modal */}
-      {activeId ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onMouseDown={() => setActiveId(null)}>
-          <div
-            className="w-full max-w-lg rounded-3xl border border-[var(--lifeos-border-soft)] bg-white p-6"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <div className="text-lg font-extrabold text-black" style={{ letterSpacing: "-0.02em" }}>
-              Edit block
+                {/* Body */}
+                <div
+                  ref={bodyRef}
+                  className="grid"
+                  style={{ gridTemplateColumns: `${timeColPx}px repeat(7, 1fr)` }}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                  onPointerCancel={onPointerUp}
+                >
+                  {/* Time labels */}
+                  <div className="relative border-r border-black/[0.04]" style={{ height: gridHeightPx }}>
+                    {hours.map((h) => (
+                      <div key={h} style={{ height: hourRowPx }} className="flex items-start justify-end pr-1.5 pt-1">
+                        <span className="text-[9px] font-semibold text-black/25 tabular-nums leading-none">{pad2(h)}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Day columns */}
+                  {days.map((d) => {
+                    const date = isoDateLocal(d);
+                    const dayBlocks = weekBlocks.filter((b) => b.date === date);
+                    const isToday = date === todayISO;
+
+                    return (
+                      <div
+                        key={date}
+                        className={`relative border-l border-black/[0.04] ${isToday ? "bg-[var(--lifeos-pink)]/[0.02]" : "bg-white"}`}
+                        style={{ height: gridHeightPx }}
+                        onDoubleClick={(e) => onDoubleClickEmpty(e, date)}
+                        onClick={() => setOverflowPopover(null)}
+                      >
+                        {/* Hour grid lines */}
+                        {hours.map((h) => (
+                          <div key={h} style={{ height: hourRowPx }} className={`border-b ${h % 2 === 0 ? "border-black/[0.05]" : "border-black/[0.025]"}`} />
+                        ))}
+
+                        {/* Blocks — exclude deadline blocks (startMin ≥ 23:00, shown in the Due row above) */}
+                        {(() => {
+                          const timedBlocks = dayBlocks.filter(
+                            (b) => b.startMin < 23 * 60
+                          );
+                          const laid = layoutDayBlocks(timedBlocks);
+                          const primaries: LayoutBlock[] = laid.filter((b) => b.col === 0);
+                          const overflows: LayoutBlock[] = laid.filter((b) => b.col > 0);
+                          const primaryMap = new Map<string, { primary: LayoutBlock; overflow: LayoutBlock[] }>();
+                          for (const p of primaries) primaryMap.set(p.id, { primary: p, overflow: [] });
+                          for (const ov of overflows) {
+                            const parent = primaries.find((p) => p.startMin < ov.endMin && ov.startMin < p.endMin);
+                            if (parent && primaryMap.has(parent.id)) primaryMap.get(parent.id)!.overflow.push(ov);
+                          }
+
+                          return Array.from(primaryMap.values()).map(({ primary: b, overflow }) => {
+                            const topPx    = minuteTopPx(b.startMin, startHour, hourRowPx);
+                            const heightPx = Math.max(24, minuteTopPx(b.endMin, startHour, hourRowPx) - topPx);
+                            const timeLabel = `${minsToHHMM(b.startMin)}–${minsToHHMM(b.endMin)}`;
+                            const short = truncTitle(b.title, 26);
+                            const isPopoverOpen = overflowPopover === b.id;
+
+                            const kind = b.meta?.kind as string | undefined;
+                            const customColor = (b.meta as any)?.color as string | undefined;
+
+                            // Use custom course color if present (syllabus blocks with user-picked color)
+                            const blockStyle = customColor && kind === "syllabus"
+                              ? {
+                                  backgroundColor: `${customColor}18`,
+                                  borderColor: `${customColor}55`,
+                                  color: customColor,
+                                }
+                              : undefined;
+
+                            const blockColor = customColor && kind === "syllabus"
+                              ? "" // inline style handles coloring
+                              : kind === "prep"       ? "bg-blue-50 border-blue-200 text-blue-800"     :
+                                kind === "follow-up"  ? "bg-emerald-50 border-emerald-200 text-emerald-800" :
+                                kind === "travel"     ? "bg-amber-50 border-amber-200 text-amber-800"   :
+                                kind === "reminder"   ? "bg-violet-50 border-violet-200 text-violet-800":
+                                kind === "buffer"     ? "bg-orange-50 border-orange-200 text-orange-800":
+                                kind === "syllabus"   ? "bg-fuchsia-50 border-fuchsia-200 text-fuchsia-800":
+                                                       "bg-[var(--lifeos-pink)]/8 border-[var(--lifeos-pink)]/25 text-black/80";
+
+                            return (
+                              <div
+                                key={b.id}
+                                className="absolute"
+                                style={{ top: topPx, height: heightPx, left: 2, right: 2, zIndex: 10 }}
+                              >
+                                <div
+                                  data-block
+                                  className={`w-full h-full cursor-grab select-none overflow-hidden rounded-lg border p-1 text-left transition-shadow hover:shadow-md active:cursor-grabbing ${blockColor}`}
+                                  style={blockStyle}
+                                  title={b.meta?.fullDetail ? `${b.title}\n${b.meta.fullDetail}` : b.title}
+                                  onPointerDown={(e) => onBlockPointerDown(e, b)}
+                                  onClick={() => openEditor(b.id)}
+                                >
+                                  <div className="truncate text-[10px] font-bold leading-tight">{short}</div>
+                                  {heightPx >= 32 && (
+                                    <div className="mt-0.5 text-[9px] opacity-60 leading-tight truncate">{timeLabel}</div>
+                                  )}
+                                </div>
+
+                                {overflow.length > 0 && (
+                                  <button
+                                    className="absolute bottom-1 right-1 z-20 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-bold text-white hover:bg-black/80 transition-colors"
+                                    onClick={(e) => { e.stopPropagation(); setOverflowPopover(isPopoverOpen ? null : b.id); }}
+                                  >
+                                    +{overflow.length}
+                                  </button>
+                                )}
+
+                                {isPopoverOpen && (
+                                  <div
+                                    className="absolute left-0 z-50 mt-1 w-60 rounded-2xl border border-black/[0.08] bg-white shadow-[0_8px_32px_rgba(0,0,0,0.12)] overflow-hidden"
+                                    style={{ top: "100%" }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <div className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-black/30 border-b border-black/[0.05]">
+                                      {overflow.length + 1} overlapping
+                                    </div>
+                                    {[b, ...overflow].map((ov) => {
+                                      const ovKind = ov.meta?.kind as string | undefined;
+                                      const dot =
+                                        ovKind === "prep"      ? "bg-blue-400"     :
+                                        ovKind === "follow-up" ? "bg-emerald-400"  :
+                                        ovKind === "travel"    ? "bg-amber-400"    :
+                                        ovKind === "reminder"  ? "bg-violet-400"   :
+                                        ovKind === "buffer"    ? "bg-orange-400"   :
+                                                                "bg-[var(--lifeos-pink)]";
+                                      return (
+                                        <button
+                                          key={ov.id}
+                                          className="flex w-full items-start gap-2.5 px-3 py-3 text-left hover:bg-black/[0.03] transition-colors border-b border-black/[0.04] last:border-b-0"
+                                          onClick={() => { setOverflowPopover(null); openEditor(ov.id); }}
+                                        >
+                                          <span className={`mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full ${dot}`} />
+                                          <div>
+                                            <div className="text-xs font-semibold text-black/80 leading-tight">{ov.title}</div>
+                                            <div className="text-[10px] text-black/35 mt-0.5">{minsToHHMM(ov.startMin)}–{minsToHHMM(ov.endMin)}</div>
+                                          </div>
+                                        </button>
+                                      );
+                                    })}
+                                    <button className="w-full px-3 py-2 text-[10px] text-black/30 hover:text-black/60 transition-colors" onClick={() => setOverflowPopover(null)}>
+                                      Close
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    );
+                  })}
+                </div>
             </div>
+          </div>
 
-            <div className="mt-5 space-y-3">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-black/50">Title</div>
-                <input
-                  value={draftTitle}
-                  onChange={(e) => setDraftTitle(e.target.value)}
-                  className="mt-1 w-full rounded-2xl border border-[var(--lifeos-border-soft)] px-4 py-3 text-sm outline-none"
-                />
+          {/* Empty state */}
+          {items.length === 0 && (
+            <div className="mt-4 rounded-2xl border border-dashed border-black/[0.08] bg-white py-10 text-center">
+              <p className="text-sm text-black/35">Your calendar is empty.</p>
+              <p className="mt-1 text-xs text-black/25">Generate a plan, then tap <span className="font-semibold">Add to Calendar</span>.</p>
+            </div>
+          )}
+        </section>
+
+        {/* ── Edit modal ── */}
+        {activeId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onMouseDown={() => setActiveId(null)}>
+            <div
+              className="w-full max-w-lg rounded-3xl bg-white shadow-[0_24px_64px_rgba(0,0,0,0.18)] p-6"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="text-lg font-extrabold text-black mb-5" style={{ letterSpacing: "-0.025em" }}>Edit block</div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-black/35 block mb-1.5">Title</label>
+                  <input
+                    value={draftTitle}
+                    onChange={(e) => setDraftTitle(e.target.value)}
+                    className="w-full rounded-2xl border border-black/[0.09] bg-black/[0.02] px-4 py-3 text-sm font-semibold text-black outline-none focus:border-[var(--lifeos-pink)] transition-colors"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="col-span-3 sm:col-span-1">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-black/35 block mb-1.5">Day</label>
+                    <select
+                      value={draftDate}
+                      onChange={(e) => setDraftDate(e.target.value)}
+                      className="w-full rounded-2xl border border-black/[0.09] bg-black/[0.02] px-3 py-3 text-sm font-semibold text-black outline-none focus:border-[var(--lifeos-pink)] transition-colors"
+                    >
+                      {days.map((d) => {
+                        const iso = isoDateLocal(d);
+                        return <option key={iso} value={iso}>{formatWeekday(d)} {formatDayLabel(d)}</option>;
+                      })}
+                    </select>
+                  </div>
+                  <div className="col-span-3 sm:col-span-1">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-black/35 block mb-1.5">Start</label>
+                    <input
+                      type="time"
+                      value={minsToHHMM(draftStart)}
+                      onChange={(e) => setDraftStart(hhmmToMins(e.target.value))}
+                      className="w-full rounded-2xl border border-black/[0.09] bg-black/[0.02] px-3 py-3 text-sm font-semibold text-black outline-none focus:border-[var(--lifeos-pink)] transition-colors"
+                    />
+                  </div>
+                  <div className="col-span-3 sm:col-span-1">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-black/35 block mb-1.5">End</label>
+                    <input
+                      type="time"
+                      value={minsToHHMM(draftEnd)}
+                      onChange={(e) => setDraftEnd(hhmmToMins(e.target.value))}
+                      className="w-full rounded-2xl border border-black/[0.09] bg-black/[0.02] px-3 py-3 text-sm font-semibold text-black outline-none focus:border-[var(--lifeos-pink)] transition-colors"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-3 sm:col-span-1">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-black/50">Day</div>
-                  <select
-                    value={draftDate}
-                    onChange={(e) => setDraftDate(e.target.value)}
-                    className="mt-1 w-full rounded-2xl border border-[var(--lifeos-border-soft)] px-3 py-3 text-sm outline-none"
+              <div className="mt-6 flex items-center justify-between gap-2">
+                <button
+                  onClick={deleteActive}
+                  className="rounded-xl border border-red-200 bg-red-50 px-5 py-2.5 text-sm font-bold text-red-600 hover:bg-red-100 transition-colors"
+                >
+                  Delete
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setActiveId(null)}
+                    className="rounded-xl border border-black/[0.08] bg-white px-5 py-2.5 text-sm font-bold text-black/60 hover:bg-black/[0.04] transition-colors"
                   >
-                    {days.map((d) => {
-                      const iso = isoDateLocal(d);
-                      return (
-                        <option key={iso} value={iso}>
-                          {formatWeekday(d)} {formatDayLabel(d)}
-                        </option>
-                      );
-                    })}
-                  </select>
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveEditor}
+                    className="rounded-xl bg-[var(--lifeos-pink)] px-5 py-2.5 text-sm font-bold text-white shadow-[0_2px_8px_rgba(255,107,107,0.3)] hover:shadow-[0_4px_14px_rgba(255,107,107,0.4)] transition-shadow"
+                  >
+                    Save changes
+                  </button>
                 </div>
-
-                <div className="col-span-3 sm:col-span-1">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-black/50">Start</div>
-                  <input
-                    type="time"
-                    value={minsToHHMM(draftStart)}
-                    onChange={(e) => setDraftStart(hhmmToMins(e.target.value))}
-                    className="mt-1 w-full rounded-2xl border border-[var(--lifeos-border-soft)] px-3 py-3 text-sm outline-none"
-                  />
-                </div>
-
-                <div className="col-span-3 sm:col-span-1">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-black/50">End</div>
-                  <input
-                    type="time"
-                    value={minsToHHMM(draftEnd)}
-                    onChange={(e) => setDraftEnd(hhmmToMins(e.target.value))}
-                    className="mt-1 w-full rounded-2xl border border-[var(--lifeos-border-soft)] px-3 py-3 text-sm outline-none"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
-              <button
-                onClick={deleteActive}
-                className="rounded-full border border-red-200 bg-red-50 px-5 py-2 text-sm font-semibold text-red-700"
-              >
-                Delete
-              </button>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setActiveId(null)}
-                  className="rounded-full border border-[var(--lifeos-border)] bg-white px-5 py-2 text-sm font-semibold text-black/70"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={saveEditor}
-                  className="rounded-full bg-[var(--lifeos-pink)] px-5 py-2 text-sm font-semibold text-white"
-                >
-                  Save
-                </button>
               </div>
             </div>
           </div>
-        </div>
-      ) : null}
+        )}
       </div>
     </div>
   );

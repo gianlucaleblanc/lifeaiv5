@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(node -e:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(git checkout:*)",
+      "Bash(lsof:*)"
     ]
   }
 }

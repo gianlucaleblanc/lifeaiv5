@@ -2,7 +2,7 @@ export const HISTORY_KEY = "lifeos_history_v1";
 
 function generateId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return generateId();
+    return crypto.randomUUID();
   }
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
@@ -125,12 +125,46 @@ const PROFILE_KEY = "lifeos_profile_v1";
 export function loadProfile(): UserProfile {
   if (typeof window === "undefined") return { daysTracked: 0, avgCompletion: 0, last7: [] };
   try {
-    const raw = window.localStorage.getItem(PROFILE_KEY);
-    if (!raw) return { daysTracked: 0, avgCompletion: 0, last7: [] };
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object"
-      ? (parsed as UserProfile)
-      : { daysTracked: 0, avgCompletion: 0, last7: [] };
+    // Compute daysTracked and last7 dynamically from calendar + history data
+    // so the stats stay accurate without needing a manual save step.
+    const base: UserProfile = (() => {
+      const raw = window.localStorage.getItem(PROFILE_KEY);
+      if (!raw) return { daysTracked: 0, avgCompletion: 0, last7: [] };
+      const parsed = JSON.parse(raw);
+      return (parsed && typeof parsed === "object" ? parsed : {}) as UserProfile;
+    })();
+
+    // Compute daysTracked = number of distinct dates with at least one calendar block
+    const calRaw = window.localStorage.getItem("lifeos_calendar_v1");
+    const calendar: Array<{ date: string }> = (() => {
+      try { const p = JSON.parse(calRaw ?? "[]"); return Array.isArray(p) ? p : []; } catch { return []; }
+    })();
+    const distinctDates = new Set(calendar.map((b) => b.date).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)));
+    const daysTracked = Math.max(base.daysTracked ?? 0, distinctDates.size);
+
+    // Build last7: for each of the last 7 calendar days, record how many blocks were scheduled.
+    // We use "blocks scheduled" as a proxy for completion since we don't have per-day done state.
+    // Blocks per day (capped at 1.0 once >= 3 blocks) → completion ratio.
+    const last7: { date: string; completion: number }[] = [];
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const blocksOnDay = calendar.filter((b) => b.date === iso).length;
+      // Normalise: 0 blocks = 0, 1 block = 0.33, 2 = 0.67, 3+ = 1.0
+      const completion = blocksOnDay >= 3 ? 1 : blocksOnDay / 3;
+      last7.push({ date: iso, completion });
+    }
+
+    // avgCompletion: average of last7 days that had any blocks (skip zero days from average)
+    const activeDays = last7.filter((d) => d.completion > 0);
+    const avgCompletion = activeDays.length
+      ? activeDays.reduce((s, d) => s + d.completion, 0) / activeDays.length
+      : (base.avgCompletion ?? 0);
+
+    return { daysTracked, avgCompletion, last7 };
   } catch {
     return { daysTracked: 0, avgCompletion: 0, last7: [] };
   }
@@ -139,6 +173,231 @@ export function loadProfile(): UserProfile {
 export function saveProfile(p: UserProfile) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
+}
+
+// ─────────────────────────────────────────────────────────────
+// Onboarding Profile  (set once on first launch)
+// ─────────────────────────────────────────────────────────────
+
+export type OnboardingProfile = {
+  name: string;
+  role: string;
+  wakeHour: number;   // 4–12
+  sleepHour: number;  // 19–26 (stored as 0–2 for past midnight)
+  completedAt: string; // ISO
+};
+
+const ONBOARDING_KEY = "lifeos_onboarding_v1";
+
+export function saveOnboardingProfile(profile: OnboardingProfile) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(ONBOARDING_KEY, JSON.stringify(profile));
+  // Immediately seed UserPreferences with wake/sleep hours so session 1
+  // already feels personalized — no feedback required.
+  const prefs = loadPreferences();
+  if (prefs.preferredStartHour === null) {
+    prefs.preferredStartHour = profile.wakeHour;
+  }
+  if (prefs.preferredEndHour === null) {
+    prefs.preferredEndHour = profile.sleepHour <= 3 ? profile.sleepHour + 24 : profile.sleepHour;
+  }
+  savePreferences(prefs);
+}
+
+export function loadOnboardingProfile(): OnboardingProfile | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(ONBOARDING_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as OnboardingProfile;
+  } catch {
+    return null;
+  }
+}
+
+export function hasCompletedOnboarding(): boolean {
+  if (typeof window === "undefined") return false;
+  return !!window.localStorage.getItem(ONBOARDING_KEY);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Learned User Preferences  (grows with every feedback session)
+// ─────────────────────────────────────────────────────────────
+
+export type UserPreferences = {
+  // Scheduling style
+  preferredStartHour: number | null;   // e.g. 8 = likes starting at 8am
+  preferredEndHour: number | null;     // e.g. 22 = fine scheduling until 10pm
+  avoidedHours: number[];              // e.g. [12,13] = never schedule during lunch
+  preferredDurations: Record<string, number>; // e.g. { run: 45, meeting: 30 }
+
+  // Content preferences learned from thumbs down / corrections
+  dislikedSuggestionKinds: string[];   // kinds the user consistently thumbs-downs
+  likedSuggestionKinds: string[];      // kinds the user consistently thumbs-ups
+
+  // Free-text notes the AI can append
+  styleNotes: string[];                // e.g. "User prefers evening workouts"
+
+  // App settings
+  darkMode: boolean;                   // dark mode toggle
+  suggestionsEnabled: boolean;         // whether to show AI prep suggestions after scheduling
+
+  // Meta
+  totalFeedbackSessions: number;
+  lastUpdated: string;                 // ISO timestamp
+};
+
+const PREFERENCES_KEY = "lifeos_preferences_v1";
+
+export function loadPreferences(): UserPreferences {
+  const def: UserPreferences = {
+    preferredStartHour: null,
+    preferredEndHour: null,
+    avoidedHours: [],
+    preferredDurations: {},
+    dislikedSuggestionKinds: [],
+    likedSuggestionKinds: [],
+    styleNotes: [],
+    darkMode: false,
+    suggestionsEnabled: true,
+    totalFeedbackSessions: 0,
+    lastUpdated: new Date().toISOString(),
+  };
+  if (typeof window === "undefined") return def;
+  try {
+    const raw = window.localStorage.getItem(PREFERENCES_KEY);
+    if (!raw) return def;
+    const parsed = JSON.parse(raw);
+    return { ...def, ...parsed };
+  } catch {
+    return def;
+  }
+}
+
+export function savePreferences(p: UserPreferences) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(p));
+}
+
+export function updatePreferences(partial: Partial<UserPreferences>) {
+  const current = loadPreferences();
+  savePreferences({ ...current, ...partial, lastUpdated: new Date().toISOString() });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Feedback events  (raw signal — one entry per thumbs up/down)
+// ─────────────────────────────────────────────────────────────
+
+export type FeedbackSignal =
+  | "thumbs_up"
+  | "thumbs_down"
+  | "too_early"
+  | "too_late"
+  | "too_long"
+  | "too_short"
+  | "wrong_day"
+  | "not_relevant";
+
+export type FeedbackEntry = {
+  id: string;
+  createdAt: string;
+  blockTitle: string;
+  blockKind: string;
+  blockDate: string;
+  startMin: number;
+  endMin: number;
+  signal: FeedbackSignal;
+  note?: string;          // optional free-text from user
+  prompt?: string;        // the original input that generated this block
+};
+
+const FEEDBACK_KEY = "lifeos_feedback_v1";
+
+export function loadFeedback(): FeedbackEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(FEEDBACK_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveFeedback(entries: FeedbackEntry[]) {
+  if (typeof window === "undefined") return;
+  // Keep max 200 most recent entries to avoid bloat
+  window.localStorage.setItem(FEEDBACK_KEY, JSON.stringify(entries.slice(0, 200)));
+}
+
+export function addFeedback(entry: Omit<FeedbackEntry, "id" | "createdAt">) {
+  const existing = loadFeedback();
+  const newEntry: FeedbackEntry = {
+    ...entry,
+    id: Math.random().toString(36).slice(2),
+    createdAt: new Date().toISOString(),
+  };
+  saveFeedback([newEntry, ...existing]);
+  return newEntry;
+}
+
+// Distil raw feedback into a human-readable summary string for AI prompts
+export function buildPreferenceContext(prefs: UserPreferences, recentFeedback: FeedbackEntry[]): string {
+  const lines: string[] = [];
+
+  if (prefs.styleNotes.length > 0) {
+    lines.push("Learned user preferences:");
+    prefs.styleNotes.slice(0, 8).forEach((n) => lines.push(`  • ${n}`));
+  }
+
+  if (prefs.preferredStartHour !== null) {
+    lines.push(`  • Prefers scheduling no earlier than ${prefs.preferredStartHour}:00`);
+  }
+  if (prefs.preferredEndHour !== null) {
+    lines.push(`  • Prefers scheduling no later than ${prefs.preferredEndHour}:00`);
+  }
+  if (prefs.avoidedHours.length > 0) {
+    const hrs = prefs.avoidedHours.map((h) => `${h}:00`).join(", ");
+    lines.push(`  • Avoid scheduling during: ${hrs}`);
+  }
+  if (Object.keys(prefs.preferredDurations).length > 0) {
+    const durs = Object.entries(prefs.preferredDurations)
+      .map(([k, v]) => `${k}=${v}min`)
+      .join(", ");
+    lines.push(`  • Preferred event durations: ${durs}`);
+  }
+  if (prefs.dislikedSuggestionKinds.length > 0) {
+    lines.push(`  • User dislikes these suggestion types: ${prefs.dislikedSuggestionKinds.join(", ")}`);
+  }
+  if (prefs.likedSuggestionKinds.length > 0) {
+    lines.push(`  • User appreciates these suggestion types: ${prefs.likedSuggestionKinds.join(", ")}`);
+  }
+
+  // Show last 5 thumbs-down signals as concrete examples
+  const dislikes = recentFeedback
+    .filter((f) => f.signal === "thumbs_down" || f.signal === "not_relevant" || f.signal === "too_early" || f.signal === "too_late")
+    .slice(0, 5);
+  if (dislikes.length > 0) {
+    lines.push("Recent negative feedback (avoid repeating):");
+    dislikes.forEach((f) => {
+      const time = `${Math.floor(f.startMin / 60)}:${String(f.startMin % 60).padStart(2, "0")}`;
+      lines.push(`  ✗ "${f.blockTitle}" at ${time} — ${f.signal.replace(/_/g, " ")}${f.note ? `: ${f.note}` : ""}`);
+    });
+  }
+
+  const likes = recentFeedback
+    .filter((f) => f.signal === "thumbs_up")
+    .slice(0, 5);
+  if (likes.length > 0) {
+    lines.push("Recent positive feedback (do more of this):");
+    likes.forEach((f) => {
+      const time = `${Math.floor(f.startMin / 60)}:${String(f.startMin % 60).padStart(2, "0")}`;
+      lines.push(`  ✓ "${f.blockTitle}" at ${time}`);
+    });
+  }
+
+  return lines.length > 0 ? lines.join("\n") : "";
 }
 
 // ------------------------------
@@ -158,6 +417,7 @@ export type CalendarBlock = {
     confidence?: number;
     source?: string;
     fullDetail?: string; // original user input, shown on hover in calendar
+    color?: string;      // user-picked hex color (syllabus course color)
   };
 };
 
@@ -189,6 +449,8 @@ export function saveCalendar(items: CalendarBlock[]) {
             confidence: b.meta.confidence,
             // Only keep very small source snippets (or omit entirely)
             source: safeSource,
+            // Preserve user-picked course color
+            color: (b.meta as any)?.color ?? undefined,
           }
         : undefined;
       return meta ? { ...b, meta } : b;
@@ -1206,7 +1468,7 @@ export type SyllabusEvent = {
   source?: string;
 };
 
-export function addSyllabusEventsToCalendar(events: SyllabusEvent[]) {
+export function addSyllabusEventsToCalendar(events: SyllabusEvent[], color?: string) {
   const all = loadCalendar();
   const newBlocks: CalendarBlock[] = [];
 
@@ -1253,6 +1515,7 @@ export function addSyllabusEventsToCalendar(events: SyllabusEvent[]) {
         // IMPORTANT: do NOT persist large source blobs; they can exceed localStorage quota.
         // If needed, a tiny snippet is kept by saveCalendar() anyway.
         source: e.source ? String(e.source).slice(0, 180) : undefined,
+        color: color || undefined,
       },
     });
   }

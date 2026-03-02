@@ -23,19 +23,64 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* Keep LifeOS consistent for now */
-    --background: #ffffff;
-    --foreground: var(--lifeos-ink);
-  }
+/* ── Dark mode — triggered by class="dark" on <html> ──────────────────────
+   Tailwind v4 maps utilities to CSS variables. Overriding --color-black and
+   --color-white here means ALL text-black, bg-white, border-black utilities
+   automatically flip — no per-class selectors needed.
+   ───────────────────────────────────────────────────────────────────────── */
+@variant dark (&:is(.dark *));
+
+html.dark {
+  /* Flip Tailwind's built-in black/white tokens */
+  --color-black: #f0ecee;
+  --color-white: #1e1820;
+
+  /* LifeOS brand overrides */
+  --lifeos-cream: #1a1014;
+  --lifeos-card: #1e1820;
+  --lifeos-ink: #f0ecee;
+  --lifeos-muted: rgba(240, 236, 238, 0.6);
+  --lifeos-border: rgba(240, 236, 238, 0.14);
+  --lifeos-border-soft: rgba(240, 236, 238, 0.08);
+
+  /* App background / foreground */
+  --background: #131013;
+  --foreground: #f0ecee;
+
+  color-scheme: dark;
 }
 
+/* Body picks up the CSS variable */
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: ui-rounded, system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
     Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+/* bg-white utility cards/surfaces (catches all variants: bg-white, bg-white/95, etc.) */
+html.dark [class*="bg-white"] {
+  background-color: #1e1820 !important;
+}
+
+/* Inputs and textareas */
+html.dark textarea,
+html.dark input[type="text"],
+html.dark input[type="date"],
+html.dark input[type="time"],
+html.dark select {
+  background-color: #1e1820 !important;
+  color: #f0ecee !important;
+}
+
+html.dark textarea::placeholder {
+  color: rgba(240, 236, 238, 0.3) !important;
+}
+
+/* Modal scrim */
+html.dark [class*="bg-black/30"],
+html.dark [class*="bg-black\/30"] {
+  background-color: rgba(0, 0, 0, 0.65) !important;
 }
 
 /* Crisp text rendering */

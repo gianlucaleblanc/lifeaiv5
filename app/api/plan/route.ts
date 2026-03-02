@@ -188,6 +188,8 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
     const input = body?.input;
+    // Learned preferences passed from client (stored in localStorage, sent on each request)
+    const preferenceContext: string = typeof body?.preferenceContext === "string" ? body.preferenceContext : "";
 
     if (!isNonEmptyString(input)) {
       return NextResponse.json(
@@ -260,6 +262,7 @@ NOTES:
 - coach should be short, punchy, motivational, and relevant to the input.
 - personalInsight should be 1–2 sentences and directly tied to the user's input (not generic).
 - streak can be 1 for now.
+${preferenceContext ? `\nUSER PREFERENCES (learned from past sessions — follow these closely):\n${preferenceContext}` : ""}
 `;
 
     const userPrompt = `

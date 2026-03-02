@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import AppShell from "./components/AppShell";
+import OnboardingWrapper from "./components/OnboardingWrapper";
 
 export const metadata: Metadata = {
   title: "LifeOS",
@@ -15,7 +16,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
-        <AppShell>{children}</AppShell>
+        <OnboardingWrapper>
+          <AppShell>{children}</AppShell>
+        </OnboardingWrapper>
       </body>
     </html>
   );

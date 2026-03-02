@@ -951,6 +951,14 @@ export async function POST(req: Request) {
     const file = form.get("file");
     const instructions = String(form.get("instructions") || "").trim();
     const sectionPrefRaw = String(form.get("section") || "").trim();
+    // Parse section early so we can inject it into the AI prompt
+    const secFromFieldEarly = sectionPrefRaw.match(/^[A-Za-z]$/) ? sectionPrefRaw.toUpperCase() : "";
+    const secFromInstrEarly = (
+      instructions.match(/\b(?:section|group)\s*([A-Za-z])\b/i)?.[1] ||
+      instructions.match(/\b(?:i\s*am|i'?m|im)\s+in\s+(?:the\s+)?(?:section|group)?\s*([A-Za-z])\b/i)?.[1] ||
+      ""
+    ).toUpperCase();
+    const detectedSection = (secFromFieldEarly || secFromInstrEarly || "").toUpperCase();
     const yearOverrideRaw = String(form.get("yearOverride") || "").trim();
     if (!file || typeof file === "string") {
       return NextResponse.json({ error: "Missing file upload." }, { status: 400 });
@@ -976,7 +984,13 @@ export async function POST(req: Request) {
 
     if (!text || text.trim().length < 50) {
       return NextResponse.json(
-        { error: "Could not read text from that file (it may be scanned or empty)." },
+        {
+          error:
+            "This file doesn't contain readable text — it's likely a scanned PDF. " +
+            "Try these options: (1) Copy the text from the PDF and paste it directly into the input box, " +
+            "(2) Export or re-save the file as a DOCX from Word or Google Docs, or " +
+            "(3) Ask your professor for a text-based version of the syllabus.",
+        },
         { status: 400 }
       );
     }
@@ -984,7 +998,12 @@ export async function POST(req: Request) {
     // Keep prompt size bounded and focused on date-bearing content.
     const clipped = condenseForDates(text);
 
-    const system = `You are LifeOS, an advanced academic calendar extraction system. Your job is to extract EVERY meaningful event from this syllabus with maximum coverage and accuracy.
+    // Build section-aware instruction block for the AI prompt
+    const sectionInstruction = detectedSection
+      ? `\n\nCRITICAL SECTION FILTER — READ THIS FIRST AND FOLLOW EXACTLY:\nThe student enrolled in Section ${detectedSection} ONLY.\n\nFor the "meetings" array:\n- Return ONLY the recurring meeting pattern(s) that belong to Section ${detectedSection}.\n- DO NOT include meeting patterns from any other section. If you include the wrong section's times, the student will show up to class at the wrong time.\n- Each meeting object MUST have: "section": "${detectedSection}"\n- If the syllabus lists multiple sections with different times, include ONLY the time slot for Section ${detectedSection}.\n\nFor the "events" array:\n- Keep ALL course-wide events (assignments, exams, quizzes, papers, projects, due dates) — these apply to everyone.\n- Remove any section-specific lecture events that are NOT for Section ${detectedSection}.\n\nIMPORTANT: The "meetings" array must contain at most ONE unique meeting pattern for this course. If you are unsure which time belongs to Section ${detectedSection}, include only the first meeting pattern you find and label it "section": "${detectedSection}".\n`
+      : "";
+
+    const system = `You are LifeOS, an advanced academic calendar extraction system. Your job is to extract EVERY meaningful event from this syllabus with maximum coverage and accuracy.${sectionInstruction}
 
 Return ONLY valid JSON. No markdown, no explanations.
 
@@ -998,7 +1017,8 @@ Schema:
     "days": Array<"Mon"|"Tue"|"Wed"|"Thu"|"Fri"|"Sat"|"Sun">,
     "startTime": "HH:MM",
     "endTime"?: "HH:MM",
-    "kind"?: "Lecture"|"Lab"|"Discussion"|"OfficeHours"|"Seminar"
+    "kind"?: "Lecture"|"Lab"|"Discussion"|"OfficeHours"|"Seminar",
+    "section"?: string
   }>,
   "events": Array<{
     "title": string,
@@ -1094,25 +1114,23 @@ This is an academic calendar tool. Missing a deadline could harm a student's gra
     // across messy exports (especially table-heavy DOCX syllabi).
     const header = parseCourseHeader(text);
 
-    // If the user provided section/group preference (e.g., "Section B" or "Group A"), apply the correct time window.
+    // Apply section-specific time window to header (uses detectedSection parsed earlier).
+    // Also build a set of "other section" times for server-side lecture filtering.
+    const otherSectionStartTimes = new Set<string>();
     {
-      const secFromField = sectionPrefRaw.match(/^[A-Za-z]$/) ? sectionPrefRaw.toUpperCase() : "";
-
-      // Instructions can come from the big prompt box and commonly look like:
-      //  - "I'm in Section B"
-      //  - "Group A"
-      //  - "im in group c"
-      // Make this tolerant and prefer explicit mentions.
-      const secFromInstr = (
-        instructions.match(/\b(?:section|group)\s*([A-Za-z])\b/i)?.[1] ||
-        instructions.match(/\b(?:i\s*am|i'?m|im)\s+in\s+(?:the\s+)?(?:section|group)?\s*([A-Za-z])\b/i)?.[1] ||
-        ""
-      ).toUpperCase();
-
-      const sec = (secFromField || secFromInstr || "A").toUpperCase();
-      if (header?.sectionTimes && header.sectionTimes[sec]) {
-        header.startTime = header.sectionTimes[sec].startTime;
-        header.endTime = header.sectionTimes[sec].endTime;
+      const sec = detectedSection || "A";
+      if (header?.sectionTimes && Object.keys(header.sectionTimes).length > 0) {
+        // Apply user's section time
+        if (header.sectionTimes[sec]) {
+          header.startTime = header.sectionTimes[sec].startTime;
+          header.endTime = header.sectionTimes[sec].endTime;
+        }
+        // Collect other sections' start times so we can filter out their lectures
+        for (const [otherSec, times] of Object.entries(header.sectionTimes)) {
+          if (otherSec !== sec && times.startTime) {
+            otherSectionStartTimes.add(times.startTime);
+          }
+        }
       }
     }
 
@@ -1298,6 +1316,30 @@ This is an academic calendar tool. Missing a deadline could harm a student's gra
       }))
       .filter((e: any) => e.title && /^\d{4}-\d{2}-\d{2}$/.test(e.date));
 
+    // Section filtering: drop any lecture event that belongs to a different section.
+    // Strategy 1 (primary): check the "section" field the AI was instructed to label.
+    // Strategy 2 (fallback): check if startTime matches another section's known time.
+    // Graded items (assignments, exams, etc.) are never filtered — they apply to all sections.
+    function isOtherSectionLecture(e: any): boolean {
+      if (!detectedSection) return false;
+      const kind = String(e.kind ?? "").toLowerCase();
+      const isLectureLike = kind === "lecture" || kind === "lab" || kind === "discussion" || kind === "seminar" || kind === "officehours";
+      if (!isLectureLike) return false;
+
+      // Strategy 1: AI labelled the event with a section field
+      const eventSection = String(e.section ?? "").trim().toUpperCase();
+      if (eventSection && eventSection !== detectedSection) return true;  // wrong section
+      if (eventSection && eventSection === detectedSection) return false; // correct section
+
+      // Strategy 2: start-time matches a known OTHER section's time
+      if (otherSectionStartTimes.size > 0) {
+        const st = String(e.startTime ?? "");
+        if (st && otherSectionStartTimes.has(st)) return true;
+      }
+
+      return false;
+    }
+
     // Merge AI + heuristic + lecture events.
     // Pass 1: dedupe by date+title (exact duplicate).
     // Heuristic results take priority over AI (more reliable for journals/tables).
@@ -1305,6 +1347,7 @@ This is an academic calendar tool. Missing a deadline could harm a student's gra
     const byKey = new Map<string, any>();
     for (const e of [...cleanedLectures, ...cleanedHeuristic, ...cleanedAi]) {
       if (!e?.title || !/^\d{4}-\d{2}-\d{2}$/.test(e.date)) continue;
+      if (isOtherSectionLecture(e)) continue; // drop events from other sections
       const k = key(e);
       if (!byKey.has(k)) byKey.set(k, e);
     }
@@ -1388,8 +1431,56 @@ This is an academic calendar tool. Missing a deadline could harm a student's gra
       const MAX_MEETING_EVENTS = 450;
       const dayNames = new Set(["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]);
 
-      const allMeetings = meetings.length
-        ? meetings
+      // When the user has specified a section, filter out meeting patterns from other sections.
+      // Strategy 1 (primary): use the "section" label the AI attached to each meeting.
+      // Strategy 2 (fallback): use start-time matching against other-section times.
+      // Strategy 3 (last resort): if multiple distinct start times remain, keep only the first
+      //   unique start time — the AI was instructed to return only one section's meetings,
+      //   so extra patterns are likely the wrong section leaking through.
+      let filteredMeetings = meetings;
+      if (meetings.length && detectedSection) {
+        // Step 1: filter by section label when present
+        const labelFiltered = meetings.filter((m: any) => {
+          const meetingSection = String(m?.section ?? "").trim().toUpperCase();
+          if (meetingSection) {
+            return meetingSection === detectedSection;
+          }
+          // No label: apply time-based fallback
+          if (otherSectionStartTimes.size > 0) {
+            const st = String(m?.startTime ?? "");
+            return !st || !otherSectionStartTimes.has(st);
+          }
+          return true; // can't determine → keep
+        });
+
+        // Step 2: if we still have multiple distinct start times after label+time filtering,
+        // and we know the user's section time from parseCourseHeader, use that to pick.
+        // Otherwise, keep only meetings with the MOST COMMON start time pattern
+        // (the AI was told to return only the user's section — duplicates are the wrong section).
+        const distinctTimes = new Set(labelFiltered.map((m: any) => String(m?.startTime ?? "")));
+        if (distinctTimes.size > 1) {
+          // If parseCourseHeader gave us the user's section time, prefer that
+          const userSectionTime = header?.sectionTimes?.[detectedSection]?.startTime;
+          if (userSectionTime) {
+            const sectionMatched = labelFiltered.filter((m: any) => String(m?.startTime ?? "") === userSectionTime);
+            filteredMeetings = sectionMatched.length > 0 ? sectionMatched : labelFiltered;
+          } else {
+            // No section time known: keep only the LAST unique start time group.
+            // Syllabi typically list sections in order A, B, C — so the user's picked section
+            // (often B or later) appears later in the AI's output.
+            const timesInOrder = labelFiltered.map((m: any) => String(m?.startTime ?? "")).filter(Boolean);
+            const lastTime = timesInOrder[timesInOrder.length - 1] ?? "";
+            filteredMeetings = lastTime
+              ? labelFiltered.filter((m: any) => String(m?.startTime ?? "") === lastTime)
+              : labelFiltered;
+          }
+        } else {
+          filteredMeetings = labelFiltered;
+        }
+      }
+
+      const allMeetings = filteredMeetings.length
+        ? filteredMeetings
         : [{
             title: `${lectureLabel} Lecture`,
             days: header.meetingDays,
@@ -1490,6 +1581,58 @@ This is an academic calendar tool. Missing a deadline could harm a student's gra
       }
       return out;
     });
+
+    // If multiple sections were detected and the user hasn't selected one yet,
+    // return just the sections list so the client can prompt the user to pick.
+    //
+    // Detection strategy (in priority order):
+    // 1. parseCourseHeader found sectionTimes (regex-based, most reliable for standard format)
+    // 2. AI returned meetings with distinct "section" labels (e.g. [{"section":"A",...},{"section":"B",...}])
+    // 3. AI returned multiple meetings with distinct start times (strong signal of multi-section course)
+    const headerSectionKeys = header?.sectionTimes ? Object.keys(header.sectionTimes) : [];
+
+    // Fallback: detect sections from AI-returned meetings
+    let aiSectionKeys: string[] = [];
+    if (headerSectionKeys.length < 2 && meetings.length >= 2) {
+      // Check for explicit section labels in meetings
+      const labeledSections: string[] = [...new Set<string>(
+        meetings
+          .map((m: any) => String(m?.section ?? "").trim().toUpperCase())
+          .filter(Boolean)
+      )];
+      if (labeledSections.length >= 2) {
+        aiSectionKeys = labeledSections.sort();
+      } else {
+        // Check for multiple distinct start times (strong multi-section signal when no labels)
+        const distinctStartTimes: string[] = [...new Set<string>(
+          meetings.map((m: any) => String(m?.startTime ?? "")).filter(Boolean)
+        )];
+        if (distinctStartTimes.length >= 2) {
+          // Assign letter labels A, B, C... so the client shows "Section A", "Section B"
+          // The client passes back the letter; on the second call the AI prompt forces
+          // return of only that section's meetings.
+          aiSectionKeys = distinctStartTimes.map((_, i) => String.fromCharCode(65 + i));
+        }
+      }
+    }
+
+    const sectionKeys = headerSectionKeys.length >= 2 ? headerSectionKeys : aiSectionKeys;
+    const hasMultipleSections = sectionKeys.length >= 2;
+    const userPickedSection = !!(secFromFieldEarly || secFromInstrEarly);
+
+    if (hasMultipleSections && !userPickedSection) {
+      return NextResponse.json({
+        needsSectionPick: true,
+        sections: sectionKeys.sort(),
+        course: raw?.course ?? header?.course ?? "",
+        meta: {
+          detected: seasonHintBase ?? null,
+          detectedYear: typeof detectedYear === "number" ? detectedYear : null,
+          nowYear,
+          needsYearConfirm: false,
+        },
+      });
+    }
 
     return NextResponse.json({
       course: raw?.course ?? "",

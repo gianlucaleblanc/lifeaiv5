@@ -19,6 +19,7 @@ type Suggested = {
   endMin: number;
   kind: string;
   reason?: string;
+  anchorIndex?: number; // which anchor this suggestion is for
 };
 
 function clamp(n: number, lo: number, hi: number) {
@@ -29,9 +30,13 @@ function isIsoDate(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-function normalizeSuggestions(raw: any, anchors: Anchor[] = []): Suggested[] {
+function normalizeSuggestions(raw: any, anchors: Anchor[] = [], maxPerAnchor = 5): Suggested[] {
   const arr = Array.isArray(raw?.suggestions) ? raw.suggestions : [];
   const out: Suggested[] = [];
+
+  // Track how many suggestions we've emitted per anchor
+  const anchorCount: Record<number, number> = {};
+  const totalMax = Math.min(anchors.length * maxPerAnchor, 15);
 
   for (const it of arr) {
     if (!it || typeof it !== "object") continue;
@@ -54,12 +59,41 @@ function normalizeSuggestions(raw: any, anchors: Anchor[] = []): Suggested[] {
     if (endMin < startMin + 15) endMin = startMin + 30;
 
     // ── HARD RULE: drop any suggestion that overlaps an anchor on the same date ──
-    // This catches cases where the model places "Leave for airport" at the same
-    // time as the flight despite explicit instructions.
     const overlapsAnchor = anchors.some(
       (a) => a.date === date && startMin < a.endMin && endMin > a.startMin
     );
     if (overlapsAnchor) continue;
+
+    // Determine which anchor this suggestion belongs to (by proximity/date)
+    let anchorIdx = it.anchorIndex;
+    if (typeof anchorIdx !== "number" || anchorIdx < 0 || anchorIdx >= anchors.length) {
+      // Infer by date + closest anchor
+      const sameDate = anchors
+        .map((a, i) => ({ a, i }))
+        .filter(({ a }) => a.date === date);
+      if (sameDate.length === 1) {
+        anchorIdx = sameDate[0].i;
+      } else if (sameDate.length > 1) {
+        // Pick closest anchor in time
+        anchorIdx = sameDate.reduce((best, { a, i }) => {
+          const distBest = Math.min(
+            Math.abs(startMin - anchors[best].startMin),
+            Math.abs(startMin - anchors[best].endMin)
+          );
+          const distCur = Math.min(
+            Math.abs(startMin - a.startMin),
+            Math.abs(startMin - a.endMin)
+          );
+          return distCur < distBest ? i : best;
+        }, sameDate[0].i);
+      } else {
+        anchorIdx = 0; // fallback
+      }
+    }
+
+    // Per-anchor cap: don't let one anchor dominate
+    if ((anchorCount[anchorIdx] ?? 0) >= maxPerAnchor) continue;
+    anchorCount[anchorIdx] = (anchorCount[anchorIdx] ?? 0) + 1;
 
     out.push({
       title,
@@ -68,9 +102,10 @@ function normalizeSuggestions(raw: any, anchors: Anchor[] = []): Suggested[] {
       endMin,
       kind: kind || "reminder",
       reason: typeof it.reason === "string" ? it.reason.slice(0, 140) : undefined,
+      anchorIndex: anchorIdx,
     });
 
-    if (out.length >= 8) break;
+    if (out.length >= totalMax) break;
   }
 
   return out;
@@ -82,41 +117,67 @@ export async function POST(req: Request) {
     const anchor = body?.anchor ?? null;
     const input = String(body?.input ?? "").slice(0, 2000);
     const anchors: Anchor[] = Array.isArray(body?.anchors) ? body.anchors.slice(0, 8) : [];
+    const preferenceContext: string = typeof body?.preferenceContext === "string" ? body.preferenceContext : "";
 
     if (!input.trim()) {
       return NextResponse.json({ suggestions: [] });
     }
 
-    // Provide the model a small anchor context, but allow it to propose
-    // extra tasks relative to the user's intent.
-    // Build anchor context string for the prompt
+    const isMultiAnchor = anchors.length > 1;
+    const maxPerAnchor = isMultiAnchor ? 4 : 5;
+
+    // Build a detailed anchor list with index labels
     const anchorStr = anchors.length > 0
-      ? anchors.map(a =>
-          `  - "${a.title}" on ${a.date} from ${a.startMin} to ${a.endMin} mins-from-midnight` +
+      ? anchors.map((a, i) =>
+          `  [${i}] "${a.title}" on ${a.date} from ${a.startMin} to ${a.endMin} mins-from-midnight` +
           ` (${Math.floor(a.startMin/60)}:${String(a.startMin%60).padStart(2,"0")}–${Math.floor(a.endMin/60)}:${String(a.endMin%60).padStart(2,"0")})`
         ).join("\n")
       : "  (none provided)";
+
+    // For multi-anchor: build per-anchor instruction blocks
+    const perAnchorInstructions = isMultiAnchor
+      ? [
+          "",
+          "══════════════════════════════════════════════════",
+          `MULTI-EVENT MODE: You have ${anchors.length} anchor events to cover.`,
+          "══════════════════════════════════════════════════",
+          `You MUST produce ${maxPerAnchor} suggestions for EACH anchor event independently.`,
+          `That means at least ${anchors.length * 2} suggestions total (2+ per anchor minimum).`,
+          "",
+          "For each anchor, output suggestions tagged with \"anchorIndex\": N (the bracket number above).",
+          "Suggestions for different anchors must NOT overlap each other.",
+          "Order all suggestions chronologically across the full day.",
+          "",
+          "EXAMPLE output structure for 2 anchors:",
+          '  { "title": "Warm-up", "date": "2025-01-10", "startMin": 510, "endMin": 525, "kind": "prep", "anchorIndex": 0, "reason": "Before the run" }',
+          '  { "title": "Cool-down stretch", "date": "2025-01-10", "startMin": 660, "endMin": 675, "kind": "follow-up", "anchorIndex": 0, "reason": "After the run" }',
+          '  { "title": "Pre-workout snack", "date": "2025-01-10", "startMin": 1020, "endMin": 1040, "kind": "prep", "anchorIndex": 1, "reason": "Fuel before workout" }',
+          '  { "title": "Post-workout shake", "date": "2025-01-10", "startMin": 1200, "endMin": 1220, "kind": "follow-up", "anchorIndex": 1, "reason": "Recovery after workout" }',
+        ]
+      : [];
 
     const system = [
       "You are an elite personal assistant AI with deep expertise in activity planning, time management, and understanding what people need before and after different types of events.",
       "",
       "The user has scheduled the following anchor event(s):",
       anchorStr,
+      ...perAnchorInstructions,
       "",
       "═══════════════════════════════════════════",
-      "RULE #1 — NEVER OVERLAP THE ANCHOR EVENT",
+      "RULE #1 — NEVER OVERLAP ANY ANCHOR EVENT",
       "═══════════════════════════════════════════",
-      "Every suggestion's [startMin, endMin) window MUST NOT overlap the anchor's [startMin, endMin) window on the same date.",
+      "Every suggestion's [startMin, endMin) window MUST NOT overlap ANY anchor's [startMin, endMin) window on the same date.",
       "- Prep tasks must END at or before the anchor's startMin",
       "- Follow-up tasks must START at or after the anchor's endMin",
       "- This rule is ABSOLUTE and overrides all other timing preferences.",
+      "- Suggestions for different anchors must also NOT overlap each other.",
       "",
       "════════════════════════════════",
       "RULE #2 — CHRONOLOGICAL ORDER",
       "════════════════════════════════",
-      "1. Prep tasks come BEFORE the anchor (ordered furthest-first)",
-      "2. Follow-up tasks come AFTER the anchor (ordered soonest-first)",
-      "3. NO suggestion may start at the same minute as the anchor starts.",
+      "1. Prep tasks come BEFORE their anchor (ordered furthest-first)",
+      "2. Follow-up tasks come AFTER their anchor (ordered soonest-first)",
+      "3. NO suggestion may start at the same minute as any anchor starts.",
       "",
       "════════════════════════════════════════",
       "RULE #3 — REALISTIC, NON-OVERLAPPING SUGGESTIONS",
@@ -212,7 +273,7 @@ export async function POST(req: Request) {
       "- Always compute times as MINUTES FROM MIDNIGHT (e.g. 9am = 540, 2pm = 840)",
       "- Respect daily boundaries: 8am (480) to 10pm (1320)",
       "- Multi-day prep (pack, research) uses a prior date with a reasonable daytime hour",
-      "- Avoid overwhelming the user: 3-6 suggestions is ideal, max 8",
+      `- Target ${maxPerAnchor} suggestions per anchor event${isMultiAnchor ? ` (${anchors.length} anchors = ~${anchors.length * maxPerAnchor} total)` : ""}`,
       "",
       "Return ONLY valid JSON: { suggestions: Suggested[] }",
       "",
@@ -223,10 +284,18 @@ export async function POST(req: Request) {
       "  startMin: number (minutes from midnight, integer),",
       "  endMin: number (minutes from midnight, integer, > startMin),",
       "  kind: string ('prep'|'follow-up'|'reminder'|'buffer'|'travel'),",
-      "  reason: string (brief why, max 80 chars)",
+      "  reason: string (brief why, max 80 chars),",
+      ...(isMultiAnchor ? ["  anchorIndex: number (0-based index of which anchor this is for)"] : []),
       "}",
       "",
       "CRITICAL: Return suggestions in PERFECT CHRONOLOGICAL ORDER (earliest date+startMin first).",
+      ...(preferenceContext ? [
+        "",
+        "════════════════════════════════════════",
+        "USER PREFERENCES (learned from feedback — follow these closely):",
+        "════════════════════════════════════════",
+        preferenceContext,
+      ] : []),
     ].join("\n");
 
     const user = JSON.stringify({ input, anchors });
@@ -249,7 +318,7 @@ export async function POST(req: Request) {
       raw = {};
     }
 
-    const suggestions = normalizeSuggestions(raw, anchors);
+    const suggestions = normalizeSuggestions(raw, anchors, maxPerAnchor);
     return NextResponse.json({ suggestions });
   } catch (e: any) {
     return NextResponse.json({ suggestions: [], error: e?.message ?? "failed" }, { status: 200 });
