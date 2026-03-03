@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { useToast } from "./components/Toast";
 import {
   addSyllabusEventsToCalendar,
   addToHistory,
@@ -1633,6 +1634,7 @@ function FeedbackBadge({ sessions, pending, onReview }: { sessions: number; pend
 // ─────────────────────────────────────────────────────────────
 export default function GeneratePage() {
   const router = useRouter();
+  const { toast } = useToast();
 
   const [missingInfoOpen, setMissingInfoOpen] = useState(false);
   const [askTypeOpen, setAskTypeOpen] = useState(false);
@@ -1665,9 +1667,6 @@ export default function GeneratePage() {
   // Section picker — shown when syllabus has multiple sections and user hasn't chosen one
   const [sectionPick, setSectionPick] = useState<{ sections: string[]; course: string } | null>(null);
 
-  // Ref for the chip "Syllabus import" hidden file input
-  const chipSyllabusInputRef = useRef<HTMLInputElement | null>(null);
-
   // File attached to the chatbox — uploaded together with the prompt when user hits Generate
   const [pendingFile, setPendingFile] = useState<File | null>(null);
 
@@ -1695,6 +1694,39 @@ export default function GeneratePage() {
   const [showImportAnother, setShowImportAnother] = useState(false);
   const [studyBlockCandidates, setStudyBlockCandidates] = useState<SyllabusEvent[]>([]);
   const [studyBlocksScheduled, setStudyBlocksScheduled] = useState(false);
+
+  // ── Multi-syllabus bulk import ──
+  type MultiSyllabusItem = {
+    file: File;
+    color: string;
+    status: "pending" | "processing" | "done" | "error";
+    eventCount?: number;
+    errorMsg?: string;
+    courseName?: string;
+    /** Set when the server detected multiple sections — user must pick one before import runs */
+    needsSection?: { sections: string[]; course: string };
+    /** The section the user picked (letter, e.g. "A") */
+    pickedSection?: string;
+  };
+  const BULK_COLORS = ["#d96c7d","#6C8EE8","#5BA85E","#E8A83C","#9B6CE8","#E86C6C","#3CB8E8"];
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [bulkQueue, setBulkQueue] = useState<MultiSyllabusItem[]>([]);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkDone, setBulkDone] = useState(false);
+  const [bulkScanning, setBulkScanning] = useState(false);
+  const bulkDropRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scan newly added bulk files for multi-section detection
+  useEffect(() => {
+    // Only scan when the modal is open and there are pending unscanned files
+    if (!showBulkImport || bulkRunning || bulkScanning) return;
+    const hasUnscanned = bulkQueue.some(
+      (it: MultiSyllabusItem) => it.status === "pending" && !it.needsSection && !it.pickedSection
+    );
+    if (!hasUnscanned) return;
+    void scanBulkForSections();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bulkQueue.length, showBulkImport]);
 
   // ── Confirmation chip state (shows parsed intent before scheduling) ──
   const [confirmChip, setConfirmChip] = useState<{
@@ -2413,6 +2445,8 @@ export default function GeneratePage() {
     addToHistory(pendingHistory, 30);
     applyApprovedPlanBlocks(planPreview, approved);
 
+    toast(`✓ ${approved.length} block${approved.length !== 1 ? "s" : ""} added to your calendar`, "success");
+
     setPlanPreview(null);
     setPendingHistory(null);
     setPlanKeep({});
@@ -2497,12 +2531,157 @@ export default function GeneratePage() {
       // ignore
     }
     setSyllabusEvents(null);
+    toast(`✓ ${selected.length} event${selected.length !== 1 ? "s" : ""} added to your calendar`, "success");
     // Offer study block generation for graded items
     const gradedItems = selected.filter((e) =>
       /exam|quiz|assignment|project|paper|midterm|final|presentation|journal/i.test(e.kind ?? e.title)
     );
     setStudyBlockCandidates(gradedItems);
     setShowImportAnother(true);
+  }
+
+  // ── Bulk import: phase 1 — scan files to detect multi-section courses ──
+  async function scanBulkForSections() {
+    if (bulkScanning || bulkRunning || bulkQueue.length === 0) return;
+    setBulkScanning(true);
+
+    // Only scan items that are still pending and haven't been scanned yet
+    const toScan = bulkQueue
+      .map((it, idx) => ({ it, idx }))
+      .filter(({ it }) => it.status === "pending" && !it.needsSection && !it.pickedSection);
+
+    for (const { it, idx } of toScan) {
+      try {
+        const fd = new FormData();
+        fd.append("file", it.file);
+        const res = await fetch("/api/import-syllabus", { method: "POST", body: fd });
+        const data = (await res.json()) as {
+          needsSectionPick?: boolean;
+          sections?: string[];
+          course?: string;
+          events?: SyllabusEvent[];
+          meta?: any;
+          error?: string;
+        };
+
+        if (data?.needsSectionPick && Array.isArray(data.sections) && data.sections.length >= 2) {
+          // Mark as needing user section choice
+          setBulkQueue((prev) =>
+            prev.map((item, i) =>
+              i === idx
+                ? { ...item, needsSection: { sections: data.sections!, course: data.course ?? "" } }
+                : item
+            )
+          );
+        }
+        // If no section pick needed, we already have data — but we'll re-fetch during runBulkImport
+        // to keep the logic clean and consistent (single code path).
+      } catch {
+        // Ignore scan errors — runBulkImport will surface them properly
+      }
+    }
+
+    setBulkScanning(false);
+  }
+
+  // ── Bulk import: phase 2 — process each file sequentially with sections known ──
+  async function runBulkImport() {
+    if (bulkRunning || bulkQueue.length === 0) return;
+
+    // Check if any item still needs a section picked
+    const needsPick = bulkQueue.some((it) => it.needsSection && !it.pickedSection);
+    if (needsPick) return; // UI will prevent this, but guard defensively
+
+    setBulkRunning(true);
+    setBulkDone(false);
+
+    for (let i = 0; i < bulkQueue.length; i++) {
+      const item = bulkQueue[i];
+      // Mark as processing
+      setBulkQueue((prev) =>
+        prev.map((it, idx) => idx === i ? { ...it, status: "processing" } : it)
+      );
+
+      try {
+        const fd = new FormData();
+        fd.append("file", item.file);
+        // If user picked a section (either from scan or inline picker), send it
+        if (item.pickedSection) {
+          fd.append("section", item.pickedSection);
+        }
+
+        const res = await fetch("/api/import-syllabus", {
+          method: "POST",
+          body: fd,
+        });
+        const data = (await res.json()) as {
+          events?: SyllabusEvent[];
+          meta?: any;
+          error?: string;
+          needsSectionPick?: boolean;
+          sections?: string[];
+          course?: string;
+        };
+
+        if (!res.ok) throw new Error(data?.error ?? "Upload failed");
+
+        // If year confirmation needed, re-call with detected year automatically
+        let events: SyllabusEvent[] = [];
+        if (data?.meta?.needsYearConfirm && data?.meta?.detectedYear) {
+          const fd2 = new FormData();
+          fd2.append("file", item.file);
+          fd2.append("yearOverride", String(data.meta.detectedYear));
+          if (item.pickedSection) fd2.append("section", item.pickedSection);
+          const res2 = await fetch("/api/import-syllabus", { method: "POST", body: fd2 });
+          const data2 = await res2.json() as { events?: SyllabusEvent[]; error?: string };
+          if (!res2.ok) throw new Error(data2?.error ?? "Upload failed");
+          events = Array.isArray(data2?.events) ? data2.events : [];
+        } else if (data?.needsSectionPick && Array.isArray(data.sections) && data.sections.length >= 2) {
+          // This shouldn't happen if scan ran first — but handle gracefully:
+          // pick first section and retry (never silently drop events)
+          const fallbackSection = data.sections[0];
+          const fd3 = new FormData();
+          fd3.append("file", item.file);
+          fd3.append("section", fallbackSection);
+          const res3 = await fetch("/api/import-syllabus", { method: "POST", body: fd3 });
+          const data3 = await res3.json() as { events?: SyllabusEvent[]; error?: string };
+          if (!res3.ok) throw new Error(data3?.error ?? "Upload failed");
+          events = Array.isArray(data3?.events) ? data3.events : [];
+          // Update the queue item to reflect which section was used
+          setBulkQueue((prev) =>
+            prev.map((it, idx) =>
+              idx === i
+                ? { ...it, needsSection: { sections: data.sections!, course: data.course ?? "" }, pickedSection: fallbackSection }
+                : it
+            )
+          );
+        } else {
+          events = Array.isArray(data?.events) ? data.events : [];
+        }
+
+        // Auto-import all events with this course's color
+        if (events.length > 0) {
+          addSyllabusEventsToCalendar(events, item.color);
+        }
+
+        const courseName = data?.course ?? data?.meta?.course ?? item.file.name.replace(/\.[^.]+$/, "");
+        setBulkQueue((prev) =>
+          prev.map((it, idx) =>
+            idx === i ? { ...it, status: "done", eventCount: events.length, courseName } : it
+          )
+        );
+      } catch (e: any) {
+        setBulkQueue((prev) =>
+          prev.map((it, idx) =>
+            idx === i ? { ...it, status: "error", errorMsg: e?.message ?? "Failed" } : it
+          )
+        );
+      }
+    }
+
+    setBulkRunning(false);
+    setBulkDone(true);
+    toast("🎉 Semester planned! All classes imported.", "success", 4000);
   }
 
   // Schedule prep study blocks 2–4 days before each graded deadline
@@ -2552,28 +2731,41 @@ export default function GeneratePage() {
     <div
       className="relative min-h-[calc(100vh-80px)] flex flex-col items-center justify-center text-center px-4"
       style={{
-        background: "radial-gradient(ellipse 70% 55% at 50% 30%, rgba(255,107,107,0.07) 0%, transparent 70%)",
+        background: "radial-gradient(ellipse 80% 50% at 50% 25%, rgba(217,108,125,0.08) 0%, transparent 65%)",
       }}
     >
 
       {/* ── Eyebrow tag ── */}
-      <div className="inline-flex items-center gap-1.5 rounded-full border border-[var(--lifeos-pink)]/25 bg-[var(--lifeos-pink)]/8 px-3.5 py-1 mb-5">
-        <span className="text-sm">✦</span>
-        <span className="text-xs font-bold tracking-widest uppercase text-[var(--lifeos-pink)]">Your AI day planner</span>
-      </div>
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: "easeOut" }}
+        className="inline-flex items-center gap-2 rounded-full border border-[var(--lifeos-pink)]/20 bg-[var(--lifeos-pink)]/6 px-4 py-1.5 mb-6"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-[var(--lifeos-pink)] animate-pulse" />
+        <span className="text-xs font-semibold tracking-wide text-[var(--lifeos-pink)]">AI-powered scheduling</span>
+      </motion.div>
 
       {/* ── Hero headline ── */}
-      <h1
-        className="text-5xl sm:text-[64px] font-extrabold text-black leading-[1.05] max-w-2xl"
-        style={{ letterSpacing: "-0.035em" }}
+      <motion.h1
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: "easeOut", delay: 0.05 }}
+        className="text-5xl sm:text-[68px] font-extrabold text-black leading-[1.02] max-w-[680px]"
+        style={{ letterSpacing: "-0.04em" }}
       >
         Tell me your day.{" "}
         <span style={{ color: "var(--lifeos-pink)" }}>I'll plan it.</span>
-      </h1>
+      </motion.h1>
 
-      <p className="mt-4 text-base text-black/40 font-medium max-w-sm">
-        Describe what you want to do — the AI handles timing, conflicts, and scheduling.
-      </p>
+      <motion.p
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: "easeOut", delay: 0.1 }}
+        className="mt-4 text-[15px] text-black/40 font-medium max-w-[360px] leading-relaxed"
+      >
+        Just describe your day in plain English — classes, workouts, errands. The AI handles the rest.
+      </motion.p>
 
       {/* ── Training badge — shows when user has given feedback ── */}
       {(feedbackSessions > 0 || pendingFeedback.length > 0) && (
@@ -2592,11 +2784,22 @@ export default function GeneratePage() {
       )}
 
       {/* ── Input card ── */}
-      <div className="mt-10 w-full max-w-2xl">
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: "easeOut", delay: 0.15 }}
+        className="mt-10 w-full max-w-xl"
+      >
 
         {/* File chip (shown above card when attached) */}
+        <AnimatePresence>
         {pendingFile && (
-          <div className="mb-3 flex justify-center">
+          <motion.div
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            className="mb-2.5 flex justify-center"
+          >
             <div className="inline-flex items-center gap-2 rounded-full bg-white border border-[var(--lifeos-border)] px-4 py-2 shadow-sm text-sm font-semibold text-black/80">
               <span>📎</span>
               <span className="max-w-[240px] truncate">{pendingFile.name}</span>
@@ -2606,16 +2809,17 @@ export default function GeneratePage() {
                 aria-label="Remove attachment"
               >✕</button>
             </div>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
 
         {/* Card container — focus ring turns pink */}
-        <div className="rounded-2xl bg-white border border-black/8 shadow-[0_4px_24px_rgba(0,0,0,0.07)] overflow-hidden focus-within:border-[var(--lifeos-pink)] focus-within:shadow-[0_4px_32px_rgba(255,107,107,0.12)] transition-all duration-200">
+        <div className="rounded-2xl bg-white border border-black/[0.07] shadow-[0_2px_16px_rgba(0,0,0,0.06),0_8px_40px_rgba(0,0,0,0.04)] overflow-hidden focus-within:border-[var(--lifeos-pink)]/50 focus-within:shadow-[0_2px_16px_rgba(217,108,125,0.08),0_8px_40px_rgba(217,108,125,0.1)] transition-all duration-250">
 
           {/* Textarea */}
           <textarea
-            className="w-full resize-none bg-transparent px-5 pt-5 pb-3 text-base font-semibold text-black placeholder:text-black/25 outline-none leading-relaxed"
-            rows={3}
+            className="w-full resize-none bg-transparent px-5 pt-5 pb-3 text-[15px] font-medium text-black placeholder:text-black/[0.22] outline-none leading-relaxed"
+            rows={4}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -2627,51 +2831,110 @@ export default function GeneratePage() {
             placeholder={
               pendingFile
                 ? `Instructions for ${pendingFile.name}… (optional)`
-                : "Today I want to run 5km, study for 2 hours, and cook dinner…"
+                : "Study for 2 hours, gym at 6pm, dinner with friends at 8…"
             }
           />
 
-          {/* Card bottom bar — attach + generate */}
-          <div className="flex items-center justify-between gap-3 border-t border-black/[0.05] px-4 py-3">
+          {/* Card bottom bar */}
+          <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
 
-            {/* Attach file button */}
-            <label
-              className="flex cursor-pointer items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-bold text-black/40 hover:bg-black/[0.04] hover:text-black/70 transition-colors"
-              title="Attach a syllabus, PDF or DOCX"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-              </svg>
-              Attach syllabus
-              <input
-                type="file"
-                accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,application/msword"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) { setPendingFile(f); setSyllabusError(null); }
-                  e.currentTarget.value = "";
-                }}
-                disabled={syllabusLoading}
-              />
-            </label>
+            {/* Left — quick action buttons */}
+            <div className="flex items-center gap-1">
+              {/* Attach syllabus */}
+              <label
+                className="flex cursor-pointer items-center justify-center h-8 w-8 rounded-lg text-black/30 hover:text-black/60 hover:bg-black/[0.05] transition-all"
+                title="Attach a syllabus PDF or DOCX"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                </svg>
+                <input
+                  type="file"
+                  accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,application/msword"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) { setPendingFile(f); setSyllabusError(null); }
+                    e.currentTarget.value = "";
+                  }}
+                  disabled={syllabusLoading}
+                />
+              </label>
 
-            {/* Generate button — inside card */}
+              {/* Bulk import */}
+              <button
+                className="flex items-center justify-center h-8 w-8 rounded-lg text-black/30 hover:text-black/60 hover:bg-black/[0.05] transition-all"
+                title="Import all syllabi at once"
+                onClick={() => { setBulkQueue([]); setBulkDone(false); setShowBulkImport(true); }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                  <path d="M12 8v8M9 11l3-3 3 3" />
+                </svg>
+              </button>
+
+              {/* Divider */}
+              <div className="h-4 w-px bg-black/[0.07] mx-1" />
+
+              {/* char count hint */}
+              {input.length > 0 && (
+                <span className="text-[10px] text-black/20 font-medium select-none tabular-nums">
+                  {input.length}
+                </span>
+              )}
+            </div>
+
+            {/* Right — generate button */}
             <button
               onClick={generate}
               disabled={!canGenerate}
-              className="flex items-center gap-2 rounded-xl bg-[var(--lifeos-pink)] px-5 py-2 text-sm font-bold text-white shadow-[0_2px_10px_rgba(255,107,107,0.35)] transition hover:shadow-[0_4px_18px_rgba(255,107,107,0.45)] hover:scale-[1.03] active:scale-[0.97] disabled:opacity-40 disabled:shadow-none disabled:scale-100"
+              className="flex items-center gap-2 rounded-xl bg-[var(--lifeos-pink)] px-5 py-2 text-sm font-bold text-white shadow-[0_2px_10px_rgba(217,108,125,0.3)] transition-all hover:shadow-[0_4px_20px_rgba(217,108,125,0.4)] hover:scale-[1.03] active:scale-[0.97] disabled:opacity-35 disabled:shadow-none disabled:scale-100"
             >
-              <span className="text-base leading-none">✦</span>
-              {syllabusLoading ? "Reading…" : loading ? "Generating…" : pendingFile ? "Import file" : "Generate plan"}
+              {syllabusLoading || loading ? (
+                <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor">
+                  <path d="M12 2l2.09 6.26L21 10l-6.91 1.74L12 18l-2.09-5.74L3 10l6.91-1.74z" />
+                </svg>
+              )}
+              <span>{syllabusLoading ? "Reading…" : loading ? "Generating…" : pendingFile ? "Import" : "Generate"}</span>
             </button>
           </div>
         </div>
 
-        {/* Keyboard hint */}
-        <p className="mt-2.5 text-center text-[11px] text-black/30 font-medium">
-          Press <kbd className="rounded-md border border-black/10 bg-black/[0.04] px-1.5 py-0.5 font-mono text-[10px]">↵ Enter</kbd> to generate &nbsp;·&nbsp; <kbd className="rounded-md border border-black/10 bg-black/[0.04] px-1.5 py-0.5 font-mono text-[10px]">⇧ Shift+Enter</kbd> for new line
-        </p>
+        {/* ── Suggestion chips — shown when input is empty ── */}
+        <AnimatePresence>
+        {!input && !loading && !syllabusLoading && (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.2 }}
+            className="mt-3 flex flex-wrap justify-center gap-1.5"
+          >
+            {([
+              { icon: "🏃", text: "Run 5km tomorrow morning" },
+              { icon: "📅", text: "Plan my whole day" },
+              { icon: "✈️", text: "Flight Friday at 10am" },
+              { icon: "🔁", text: "Gym every Mon, Wed, Fri at 7am" },
+              { icon: "📚", text: "Study session + gym this week" },
+            ] as { icon: string; text: string }[]).map(({ icon, text }) => (
+              <button
+                key={text}
+                onClick={() => setInput(text)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-black/[0.07] bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-black/45 hover:text-black/75 hover:border-black/[0.15] hover:bg-white hover:scale-[1.02] active:scale-[0.98] transition-all duration-150 shadow-[0_1px_4px_rgba(0,0,0,0.04)]"
+              >
+                <span className="text-[12px] leading-none">{icon}</span>
+                {text}
+              </button>
+            ))}
+          </motion.div>
+        )}
+        </AnimatePresence>
 
         {/* ── Confirmation chip — appears after parsing, before committing ── */}
         {confirmChip && (
@@ -2698,67 +2961,6 @@ export default function GeneratePage() {
           </div>
         )}
 
-        {/* Feature hint chips — interactive */}
-        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-
-          {/* 🔁 Recurring events — pre-fills the textarea with a template */}
-          <button
-            className="inline-flex items-center gap-1.5 rounded-full bg-black/[0.04] px-3 py-1.5 text-xs font-semibold text-black/50 hover:bg-[var(--lifeos-pink)]/10 hover:text-[var(--lifeos-pink)] transition-colors cursor-pointer"
-            onClick={() => {
-              setInput((prev) => prev.trim() ? prev : "gym every Monday, Wednesday, Friday at 7am");
-            }}
-            title="Try recurring events — pre-fills an example"
-          >
-            <span>🔁</span>
-            <span>Recurring events</span>
-          </button>
-
-          {/* 📎 Syllabus import — triggers file picker */}
-          <label
-            className="inline-flex items-center gap-1.5 rounded-full bg-black/[0.04] px-3 py-1.5 text-xs font-semibold text-black/50 hover:bg-[var(--lifeos-pink)]/10 hover:text-[var(--lifeos-pink)] transition-colors cursor-pointer"
-            title="Import your syllabus PDF or DOCX"
-          >
-            <span>📎</span>
-            <span>Syllabus import</span>
-            <input
-              ref={chipSyllabusInputRef}
-              type="file"
-              accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,application/msword"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) { setPendingFile(f); setSyllabusError(null); }
-                e.currentTarget.value = "";
-              }}
-              disabled={syllabusLoading}
-            />
-          </label>
-
-          {/* ⏰ Smart scheduling — pre-fills a time-based example */}
-          <button
-            className="inline-flex items-center gap-1.5 rounded-full bg-black/[0.04] px-3 py-1.5 text-xs font-semibold text-black/50 hover:bg-[var(--lifeos-pink)]/10 hover:text-[var(--lifeos-pink)] transition-colors cursor-pointer"
-            onClick={() => {
-              setInput((prev) => prev.trim() ? prev : "dentist appointment tomorrow at 2pm, then pick up groceries");
-            }}
-            title="Smart scheduling finds the best available slot"
-          >
-            <span>⏰</span>
-            <span>Smart scheduling</span>
-          </button>
-
-          {/* ✨ AI suggestions — pre-fills a prompt that gets suggestions */}
-          <button
-            className="inline-flex items-center gap-1.5 rounded-full bg-black/[0.04] px-3 py-1.5 text-xs font-semibold text-black/50 hover:bg-[var(--lifeos-pink)]/10 hover:text-[var(--lifeos-pink)] transition-colors cursor-pointer"
-            onClick={() => {
-              setInput((prev) => prev.trim() ? prev : "flight to New York next Friday at 8am");
-            }}
-            title="AI suggests prep, travel, and recovery blocks around your event"
-          >
-            <span>✨</span>
-            <span>AI suggestions</span>
-          </button>
-        </div>
-
         {/* Error banners */}
         {error && (
           <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 text-left">
@@ -2771,7 +2973,7 @@ export default function GeneratePage() {
           </div>
         )}
         {/* suggestions loading handled by SuggestionsLoadingOverlay */}
-      </div>
+      </motion.div>
 
       {/* ── Today strip — upcoming blocks for today (below input) ── */}
       <TodayStrip />
@@ -3386,6 +3588,298 @@ export default function GeneratePage() {
                 View calendar →
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bulk import modal ── */}
+      {showBulkImport && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/30 p-0 sm:p-4">
+          <div className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl border border-[var(--lifeos-border-soft)] bg-white flex flex-col max-h-[92vh]">
+
+            {/* Header */}
+            <div className="px-6 pt-6 pb-4 border-b border-black/[0.05] shrink-0">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-xl font-extrabold text-black" style={{ letterSpacing: "-0.02em" }}>
+                    📚 Import all your classes
+                  </div>
+                  <p className="mt-1 text-sm text-black/50 leading-relaxed">
+                    Drop all your syllabus files. We'll plan your entire semester in one shot.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowBulkImport(false)}
+                  className="shrink-0 rounded-full p-2 text-black/30 hover:text-black/60 hover:bg-black/[0.05] transition-colors"
+                  aria-label="Close"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Scrollable body */}
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+
+              {/* Done summary screen */}
+              {bulkDone ? (
+                <div className="text-center py-6">
+                  <div className="text-4xl mb-3">🎉</div>
+                  <div className="text-lg font-extrabold text-black mb-1" style={{ letterSpacing: "-0.02em" }}>
+                    Semester planned!
+                  </div>
+                  <p className="text-sm text-black/50 mb-5">
+                    {bulkQueue.filter((it) => it.status === "done").reduce((sum, it) => sum + (it.eventCount ?? 0), 0)} events imported across {bulkQueue.filter((it) => it.status === "done").length} course{bulkQueue.filter((it) => it.status === "done").length !== 1 ? "s" : ""}
+                  </p>
+                  <div className="space-y-2 text-left mb-6">
+                    {bulkQueue.map((item, idx) => (
+                      <div key={idx} className="flex items-center gap-3 rounded-2xl border border-black/[0.06] bg-black/[0.02] px-4 py-3">
+                        <div className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold text-black/80 truncate">{item.courseName ?? item.file.name}</div>
+                          {item.status === "done" && (
+                            <div className="text-xs text-black/40">{item.eventCount} event{item.eventCount !== 1 ? "s" : ""} added</div>
+                          )}
+                          {item.status === "error" && (
+                            <div className="text-xs text-red-500">{item.errorMsg ?? "Failed to import"}</div>
+                          )}
+                        </div>
+                        {item.status === "done" && <span className="text-green-500 font-bold text-sm shrink-0">✓</span>}
+                        {item.status === "error" && <span className="text-red-400 font-bold text-sm shrink-0">✕</span>}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => { setShowBulkImport(false); router.push("/calendar"); }}
+                      className="w-full rounded-2xl bg-[var(--lifeos-pink)] px-5 py-3 text-sm font-bold text-white shadow-sm hover:opacity-90 transition-opacity"
+                    >
+                      View calendar →
+                    </button>
+                    <button
+                      onClick={() => { setBulkQueue([]); setBulkDone(false); }}
+                      className="w-full rounded-2xl border border-[var(--lifeos-border)] bg-white px-5 py-3 text-sm font-semibold text-black/60 hover:bg-black/[0.02] transition-colors"
+                    >
+                      Import more classes
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Drop zone */}
+                  <div
+                    ref={bulkDropRef}
+                    onDragOver={(e) => { e.preventDefault(); (e.currentTarget as HTMLDivElement).setAttribute("data-drag", "1"); }}
+                    onDragLeave={(e) => { (e.currentTarget as HTMLDivElement).removeAttribute("data-drag"); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      (e.currentTarget as HTMLDivElement).removeAttribute("data-drag");
+                      const files = Array.from(e.dataTransfer.files).filter((f) =>
+                        f.type === "application/pdf" ||
+                        f.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+                        f.name.endsWith(".docx") || f.name.endsWith(".pdf")
+                      );
+                      if (files.length === 0) return;
+                      setBulkQueue((prev) => {
+                        const existing = new Set(prev.map((it) => it.file.name));
+                        const newItems = files
+                          .filter((f) => !existing.has(f.name))
+                          .map((f, i) => ({
+                            file: f,
+                            color: BULK_COLORS[(prev.length + i) % BULK_COLORS.length],
+                            status: "pending" as const,
+                          }));
+                        return [...prev, ...newItems];
+                      });
+                    }}
+                    className="relative flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-black/15 bg-black/[0.02] p-8 text-center transition-colors
+                      data-[drag]:border-[var(--lifeos-pink)] data-[drag]:bg-[var(--lifeos-pink)]/5 cursor-pointer"
+                  >
+                    <span className="text-3xl">🗂️</span>
+                    <div className="text-sm font-semibold text-black/50">Drop all your syllabi here</div>
+                    <div className="text-xs text-black/35">PDF or DOCX · Multiple files at once</div>
+                    <label className="mt-2 cursor-pointer rounded-full bg-black/[0.05] px-4 py-2 text-xs font-bold text-black/50 hover:bg-[var(--lifeos-pink)]/10 hover:text-[var(--lifeos-pink)] transition-colors">
+                      Or browse files
+                      <input
+                        type="file"
+                        multiple
+                        accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,application/msword"
+                        className="hidden"
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files ?? []);
+                          if (files.length === 0) return;
+                          setBulkQueue((prev) => {
+                            const existing = new Set(prev.map((it) => it.file.name));
+                            const newItems = files
+                              .filter((f) => !existing.has(f.name))
+                              .map((f, i) => ({
+                                file: f,
+                                color: BULK_COLORS[(prev.length + i) % BULK_COLORS.length],
+                                status: "pending" as const,
+                              }));
+                            return [...prev, ...newItems];
+                          });
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  {/* Queue list */}
+                  {bulkQueue.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-xs font-bold uppercase tracking-wider text-black/35 px-1">
+                        {bulkQueue.length} file{bulkQueue.length !== 1 ? "s" : ""} queued
+                      </div>
+                      {bulkQueue.map((item, idx) => (
+                        <div key={idx} className="rounded-2xl border border-black/[0.06] bg-white shadow-sm overflow-hidden">
+                          <div className="flex items-center gap-3 px-4 py-3">
+                            {/* Status indicator */}
+                            <div className="shrink-0 w-6 h-6 flex items-center justify-center">
+                              {item.status === "pending" && !item.needsSection && (
+                                <div className="h-2.5 w-2.5 rounded-full bg-black/20" />
+                              )}
+                              {item.status === "pending" && item.needsSection && !item.pickedSection && (
+                                <span className="text-amber-400 font-bold text-sm">!</span>
+                              )}
+                              {item.status === "pending" && item.needsSection && item.pickedSection && (
+                                <div className="h-2.5 w-2.5 rounded-full bg-[var(--lifeos-pink)]" />
+                              )}
+                              {item.status === "processing" && (
+                                <motion.div
+                                  className="h-2.5 w-2.5 rounded-full"
+                                  style={{ backgroundColor: item.color }}
+                                  animate={{ scale: [1, 1.4, 1], opacity: [1, 0.6, 1] }}
+                                  transition={{ duration: 1, repeat: Infinity }}
+                                />
+                              )}
+                              {item.status === "done" && (
+                                <span className="text-green-500 font-bold text-sm">✓</span>
+                              )}
+                              {item.status === "error" && (
+                                <span className="text-red-400 font-bold text-sm">✕</span>
+                              )}
+                            </div>
+
+                            {/* File info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-semibold text-black/80 truncate">
+                                {item.courseName ?? item.file.name.replace(/\.[^.]+$/, "")}
+                              </div>
+                              <div className="text-xs text-black/35">
+                                {item.status === "pending" && !item.needsSection && "Ready to import"}
+                                {item.status === "pending" && item.needsSection && !item.pickedSection && (
+                                  <span className="text-amber-500 font-medium">Pick your section below</span>
+                                )}
+                                {item.status === "pending" && item.needsSection && item.pickedSection && (
+                                  <span className="text-[var(--lifeos-pink)] font-medium">Section {item.pickedSection} selected</span>
+                                )}
+                                {item.status === "processing" && "Importing…"}
+                                {item.status === "done" && `${item.eventCount} event${item.eventCount !== 1 ? "s" : ""} added`}
+                                {item.status === "error" && (item.errorMsg ?? "Failed")}
+                              </div>
+                            </div>
+
+                            {/* Color picker */}
+                            {item.status === "pending" && (
+                              <div className="flex items-center gap-1 shrink-0">
+                                {BULK_COLORS.map((c) => (
+                                  <button
+                                    key={c}
+                                    onClick={() => setBulkQueue((prev) =>
+                                      prev.map((it, i) => i === idx ? { ...it, color: c } : it)
+                                    )}
+                                    className="h-4 w-4 rounded-full transition-transform hover:scale-125"
+                                    style={{
+                                      backgroundColor: c,
+                                      outline: item.color === c ? `2px solid ${c}` : "2px solid transparent",
+                                      outlineOffset: "2px",
+                                    }}
+                                    title={c}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                            {/* Color swatch for in-progress / done */}
+                            {item.status !== "pending" && (
+                              <div
+                                className="shrink-0 h-4 w-4 rounded-full"
+                                style={{ backgroundColor: item.color }}
+                              />
+                            )}
+
+                            {/* Remove button (only when pending) */}
+                            {item.status === "pending" && !bulkRunning && (
+                              <button
+                                onClick={() => setBulkQueue((prev) => prev.filter((_, i) => i !== idx))}
+                                className="shrink-0 ml-1 text-black/25 hover:text-black/60 transition-colors"
+                                aria-label="Remove"
+                              >
+                                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                                  <path d="M18 6L6 18M6 6l12 12" />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Inline section picker — shown when server detected multiple sections */}
+                          {item.status === "pending" && item.needsSection && !item.pickedSection && (
+                            <div className="px-4 pb-3 border-t border-amber-100 bg-amber-50/60">
+                              <p className="text-xs text-amber-700 font-medium mt-2 mb-2">
+                                {item.needsSection.course
+                                  ? <><span className="font-bold">{item.needsSection.course}</span> has multiple sections. Which one are you in?</>
+                                  : "Multiple sections found. Which one are you in?"}
+                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                {item.needsSection.sections.map((sec) => (
+                                  <button
+                                    key={sec}
+                                    onClick={() => setBulkQueue((prev) =>
+                                      prev.map((it, i) => i === idx ? { ...it, pickedSection: sec } : it)
+                                    )}
+                                    className="rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-[var(--lifeos-pink)] hover:border-[var(--lifeos-pink)] hover:text-white transition-colors"
+                                  >
+                                    Section {sec}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            {!bulkDone && (() => {
+              const pendingSectionPicks = bulkQueue.filter((it) => it.needsSection && !it.pickedSection);
+              const allReady = pendingSectionPicks.length === 0;
+              return (
+              <div className="px-6 py-4 border-t border-black/[0.05] shrink-0 space-y-2">
+                {pendingSectionPicks.length > 0 && (
+                  <p className="text-xs text-amber-600 font-medium text-center">
+                    ⚠ Pick a section for {pendingSectionPicks.length} course{pendingSectionPicks.length !== 1 ? "s" : ""} above before importing
+                  </p>
+                )}
+                <button
+                  onClick={() => void runBulkImport()}
+                  disabled={bulkQueue.length === 0 || bulkRunning || bulkScanning || !allReady}
+                  className="w-full rounded-2xl bg-[var(--lifeos-pink)] px-5 py-3.5 text-sm font-bold text-white shadow-[0_2px_10px_rgba(255,107,107,0.3)] hover:shadow-[0_4px_18px_rgba(255,107,107,0.4)] hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-40 disabled:shadow-none disabled:scale-100"
+                >
+                  {bulkRunning
+                    ? `Importing ${bulkQueue.findIndex((it) => it.status === "processing") + 1} of ${bulkQueue.length}…`
+                    : bulkScanning
+                    ? "Scanning files…"
+                    : `Import ${bulkQueue.length > 0 ? `all ${bulkQueue.length} ` : ""}syllab${bulkQueue.length === 1 ? "us" : "i"}`}
+                </button>
+              </div>
+              );
+            })()}
           </div>
         </div>
       )}

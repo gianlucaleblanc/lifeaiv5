@@ -63,25 +63,74 @@ html.dark [class*="bg-white"] {
   background-color: #1e1820 !important;
 }
 
+/* Modals & popover panels — white background with inline style override.
+   Only target elements that use bg-white or have no explicit bg color set.
+   Exclude small chips/badges (rounded-full) and accent-colored elements. */
+html.dark .rounded-3xl:not([class*="bg-"]),
+html.dark .rounded-t-3xl:not([class*="bg-"]) {
+  background-color: #1e1820;
+}
+
+/* Cards — only flip background when the element uses bg-white explicitly
+   OR has no background class at all. Chips (rounded-full), colored badges,
+   and elements with explicit accent colors are excluded via :not() guards. */
+html.dark .rounded-2xl:not([class*="bg-"]):not([class*="bg-amber"]):not([class*="bg-red"]):not([class*="bg-emerald"]):not([class*="bg-violet"]):not([class*="bg-blue"]):not([class*="bg-yellow"]):not([class*="bg-green"]):not([class*="bg-fuchsia"]):not([class*="bg-orange"]) {
+  background-color: #1e1820;
+}
+/* Explicitly flip only the white-bg cards, not coloured chips */
+html.dark .rounded-2xl.bg-white {
+  background-color: #1e1820 !important;
+}
+
+/* Cards that use inline style bg */
+html.dark [style*="background: white"],
+html.dark [style*="background-color: white"],
+html.dark [style*="background-color: rgb(255, 255, 255)"] {
+  background-color: #1e1820 !important;
+}
+
 /* Inputs and textareas */
 html.dark textarea,
 html.dark input[type="text"],
 html.dark input[type="date"],
 html.dark input[type="time"],
+html.dark input[type="email"],
 html.dark select {
   background-color: #1e1820 !important;
   color: #f0ecee !important;
+  border-color: rgba(240, 236, 238, 0.15) !important;
 }
 
-html.dark textarea::placeholder {
+html.dark textarea::placeholder,
+html.dark input::placeholder {
   color: rgba(240, 236, 238, 0.3) !important;
 }
 
-/* Modal scrim */
+/* Modal scrim — darken it more in dark mode */
 html.dark [class*="bg-black/30"],
 html.dark [class*="bg-black\/30"] {
   background-color: rgba(0, 0, 0, 0.65) !important;
 }
+
+/* Ensure borders are visible in dark mode */
+html.dark [class*="border-black/"] {
+  --tw-border-opacity: 1;
+}
+
+/* Skeleton loaders */
+html.dark [class*="bg-black/[0.04]"],
+html.dark [class*="bg-black/[0.06]"] {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Scrollbar styling */
+html.dark ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+html.dark ::-webkit-scrollbar-track { background: transparent; }
+html.dark ::-webkit-scrollbar-thumb { background: rgba(240, 236, 238, 0.15); border-radius: 999px; }
+html.dark ::-webkit-scrollbar-thumb:hover { background: rgba(240, 236, 238, 0.25); }
 
 /* Crisp text rendering */
 html {

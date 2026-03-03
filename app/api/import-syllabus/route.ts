@@ -998,10 +998,14 @@ export async function POST(req: Request) {
     // Keep prompt size bounded and focused on date-bearing content.
     const clipped = condenseForDates(text);
 
-    // Build section-aware instruction block for the AI prompt
+    // Build section-aware instruction block for the AI prompt.
+    // When a section is known (second call), force the AI to return ONLY that section's meetings.
+    // When no section is known yet (first call), instruct the AI to label sections consistently
+    // so our detection logic can reliably split them — this prevents mixed-section output that
+    // confuses downstream filtering.
     const sectionInstruction = detectedSection
-      ? `\n\nCRITICAL SECTION FILTER — READ THIS FIRST AND FOLLOW EXACTLY:\nThe student enrolled in Section ${detectedSection} ONLY.\n\nFor the "meetings" array:\n- Return ONLY the recurring meeting pattern(s) that belong to Section ${detectedSection}.\n- DO NOT include meeting patterns from any other section. If you include the wrong section's times, the student will show up to class at the wrong time.\n- Each meeting object MUST have: "section": "${detectedSection}"\n- If the syllabus lists multiple sections with different times, include ONLY the time slot for Section ${detectedSection}.\n\nFor the "events" array:\n- Keep ALL course-wide events (assignments, exams, quizzes, papers, projects, due dates) — these apply to everyone.\n- Remove any section-specific lecture events that are NOT for Section ${detectedSection}.\n\nIMPORTANT: The "meetings" array must contain at most ONE unique meeting pattern for this course. If you are unsure which time belongs to Section ${detectedSection}, include only the first meeting pattern you find and label it "section": "${detectedSection}".\n`
-      : "";
+      ? `\n\nCRITICAL SECTION FILTER — READ THIS FIRST AND FOLLOW EXACTLY:\nThe student is enrolled in Section ${detectedSection} ONLY.\n\nFor the "meetings" array:\n- Return ONLY the recurring meeting pattern(s) that belong to Section ${detectedSection}.\n- DO NOT include meeting patterns from any other section. If you include the wrong section's times, the student will show up to class at the wrong time.\n- Each meeting object MUST have: "section": "${detectedSection}"\n- If the syllabus lists multiple sections with different times, include ONLY the time slot for Section ${detectedSection}.\n\nFor the "events" array:\n- Keep ALL course-wide events (assignments, exams, quizzes, papers, projects, due dates) — these apply to everyone.\n- Remove any section-specific lecture events that are NOT for Section ${detectedSection}.\n\nIMPORTANT: The "meetings" array must contain at most ONE unique meeting pattern for this course. If you are unsure which time belongs to Section ${detectedSection}, include only the first meeting pattern you find and label it "section": "${detectedSection}".\n`
+      : `\n\nMEETINGS EXTRACTION RULES:\n- If the syllabus lists multiple sections (e.g., Section A at 10:00, Section B at 13:00), include ALL of them in the "meetings" array and label each with a "section" field (e.g., "section": "A", "section": "B").\n- If the course has only ONE section or meeting pattern, return just that one and do NOT add a "section" field.\n- IMPORTANT: each entry in "meetings" must represent a DISTINCT recurring pattern. Do NOT include the same days+time twice.\n`;
 
     const system = `You are LifeOS, an advanced academic calendar extraction system. Your job is to extract EVERY meaningful event from this syllabus with maximum coverage and accuracy.${sectionInstruction}
 
@@ -1454,33 +1458,46 @@ This is an academic calendar tool. Missing a deadline could harm a student's gra
         });
 
         // Step 2: if we still have multiple distinct start times after label+time filtering,
-        // and we know the user's section time from parseCourseHeader, use that to pick.
-        // Otherwise, keep only meetings with the MOST COMMON start time pattern
-        // (the AI was told to return only the user's section — duplicates are the wrong section).
+        // use parseCourseHeader's section-time mapping to pick the right one.
+        // If that's not available, fall back to matching by section letter in the AI output.
+        // Last resort: keep all — the safety valve below handles zero-event scenarios.
         const distinctTimes = new Set(labelFiltered.map((m: any) => String(m?.startTime ?? "")));
         if (distinctTimes.size > 1) {
-          // If parseCourseHeader gave us the user's section time, prefer that
+          // Priority 1: parseCourseHeader gave us the user's section time explicitly
           const userSectionTime = header?.sectionTimes?.[detectedSection]?.startTime;
           if (userSectionTime) {
             const sectionMatched = labelFiltered.filter((m: any) => String(m?.startTime ?? "") === userSectionTime);
             filteredMeetings = sectionMatched.length > 0 ? sectionMatched : labelFiltered;
           } else {
-            // No section time known: keep only the LAST unique start time group.
-            // Syllabi typically list sections in order A, B, C — so the user's picked section
-            // (often B or later) appears later in the AI's output.
-            const timesInOrder = labelFiltered.map((m: any) => String(m?.startTime ?? "")).filter(Boolean);
-            const lastTime = timesInOrder[timesInOrder.length - 1] ?? "";
-            filteredMeetings = lastTime
-              ? labelFiltered.filter((m: any) => String(m?.startTime ?? "") === lastTime)
-              : labelFiltered;
+            // Priority 2: the AI labeled meetings with section letters — pick the matching one
+            // (Now that we instruct the AI to always label sections, this should be reliable)
+            const sectionLetterMatched = labelFiltered.filter((m: any) => {
+              const sec = String(m?.section ?? "").trim().toUpperCase();
+              return sec === detectedSection;
+            });
+            if (sectionLetterMatched.length > 0) {
+              filteredMeetings = sectionLetterMatched;
+            } else {
+              // Priority 3: cannot determine — keep all meetings rather than guessing wrong.
+              // The user will at minimum see all section times and can edit afterwards.
+              // This is safer than arbitrarily picking the last time group (which was often wrong).
+              filteredMeetings = labelFiltered;
+            }
           }
         } else {
           filteredMeetings = labelFiltered;
         }
       }
 
-      const allMeetings = filteredMeetings.length
+      // Safety valve: if section filtering removed ALL meetings but unfiltered had some,
+      // fall back to unfiltered set rather than generating zero lecture events.
+      // This handles the case where the AI didn't label sections consistently.
+      const effectiveMeetings = filteredMeetings.length > 0
         ? filteredMeetings
+        : (meetings.length > 0 ? meetings : []);
+
+      const allMeetings = effectiveMeetings.length
+        ? effectiveMeetings
         : [{
             title: `${lectureLabel} Lecture`,
             days: header.meetingDays,
