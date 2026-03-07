@@ -5,9 +5,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   addCalendarBlock,
   deleteCalendarBlock,
+  deleteCalendarSeries,
   loadCalendar,
   saveCalendar,
   updateCalendarBlock,
+  updateCalendarSeries,
   type CalendarBlock,
 } from "../lib/storage";
 import { useToast } from "../components/Toast";
@@ -69,35 +71,57 @@ type LayoutBlock = CalendarBlock & { col: number; cols: number };
 
 function layoutDayBlocks(blocks: CalendarBlock[]): LayoutBlock[] {
   if (blocks.length === 0) return [];
+
   const sorted = [...blocks].sort((a, b) =>
     a.startMin !== b.startMin ? a.startMin - b.startMin : (b.endMin - b.startMin) - (a.endMin - a.startMin)
   );
-  const clusterOf = new Array<number>(sorted.length).fill(-1);
-  let nextCluster = 0;
-  for (let i = 0; i < sorted.length; i++) {
-    if (clusterOf[i] === -1) clusterOf[i] = nextCluster++;
-    const ci = clusterOf[i];
-    for (let j = i + 1; j < sorted.length; j++) {
-      if (sorted[i].endMin > sorted[j].startMin && sorted[j].endMin > sorted[i].startMin) {
-        if (clusterOf[j] === -1) clusterOf[j] = ci;
-        else if (clusterOf[j] !== ci) {
-          const old = clusterOf[j];
-          for (let k = 0; k < sorted.length; k++) if (clusterOf[k] === old) clusterOf[k] = ci;
-        }
+  const n = sorted.length;
+
+  // ── Step 1: find connected overlap groups via union-find ──────────────────
+  const parent = Array.from({ length: n }, (_, i) => i);
+  function find(x: number): number { return parent[x] === x ? x : (parent[x] = find(parent[x])); }
+  function union(a: number, b: number) { parent[find(a)] = find(b); }
+  for (let i = 0; i < n; i++)
+    for (let j = i + 1; j < n; j++)
+      if (sorted[i].endMin > sorted[j].startMin && sorted[j].endMin > sorted[i].startMin)
+        union(i, j);
+
+  // ── Step 2: within each group, assign columns greedily ───────────────────
+  // colEnds[groupRoot][c] = endMin of last block in column c of that group
+  const groupColEnds: Record<number, number[]> = {};
+  const colAssign = new Array<number>(n);
+  for (let i = 0; i < n; i++) {
+    const g = find(i);
+    if (!groupColEnds[g]) groupColEnds[g] = [];
+    const ends = groupColEnds[g];
+    let placed = false;
+    for (let c = 0; c < ends.length; c++) {
+      if (ends[c] <= sorted[i].startMin) {
+        colAssign[i] = c;
+        ends[c] = sorted[i].endMin;
+        placed = true;
+        break;
       }
     }
+    if (!placed) {
+      colAssign[i] = ends.length;
+      ends.push(sorted[i].endMin);
+    }
   }
-  const clusterPos: Record<number, number> = {};
-  const clusterSize: Record<number, number> = {};
-  for (let i = 0; i < sorted.length; i++) clusterSize[clusterOf[i]] = (clusterSize[clusterOf[i]] ?? 0) + 1;
-  const result: LayoutBlock[] = [];
-  for (let i = 0; i < sorted.length; i++) {
-    const c = clusterOf[i];
-    const pos = clusterPos[c] ?? 0;
-    clusterPos[c] = pos + 1;
-    result.push({ ...sorted[i], col: pos, cols: clusterSize[c] });
+
+  // ── Step 3: cols = max columns used in this block's group ────────────────
+  // (all members of the same group share the same cols value for visual consistency)
+  const groupCols: Record<number, number> = {};
+  for (let i = 0; i < n; i++) {
+    const g = find(i);
+    groupCols[g] = Math.max(groupCols[g] ?? 0, colAssign[i] + 1);
   }
-  return result;
+
+  return sorted.map((b, i) => ({
+    ...b,
+    col: colAssign[i],
+    cols: groupCols[find(i)],
+  }));
 }
 
 function minsToHHMM(mins: number) {
@@ -128,6 +152,43 @@ function findNextFree(blocks: CalendarBlock[], startMin: number, durationMin: nu
     if (t + durationMin > windowEnd) break;
   }
   return { startMin: clamp(startMin, windowStart, windowEnd - durationMin), endMin: clamp(startMin + durationMin, windowStart + durationMin, windowEnd) };
+}
+
+// ── iCal export helpers ───────────────────────────────────────
+function blockToVEvent(b: CalendarBlock): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  const [y, mo, d] = b.date.split("-").map(Number);
+  const sh = Math.floor(b.startMin / 60), sm = b.startMin % 60;
+  const eh = Math.floor(b.endMin / 60), em = b.endMin % 60;
+  const dtStart = `${y}${p(mo)}${p(d)}T${p(sh)}${p(sm)}00`;
+  const dtEnd   = `${y}${p(mo)}${p(d)}T${p(eh)}${p(em)}00`;
+  const summary = b.title.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+  return [
+    "BEGIN:VEVENT",
+    `UID:${b.id}@openhour`,
+    `DTSTART:${dtStart}`,
+    `DTEND:${dtEnd}`,
+    `SUMMARY:${summary}`,
+    "END:VEVENT",
+  ].join("\r\n");
+}
+
+function exportIcal(blocks: CalendarBlock[]): void {
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//OpenHour//EN",
+    "CALSCALE:GREGORIAN",
+    ...blocks.map(blockToVEvent),
+    "END:VCALENDAR",
+  ].join("\r\n");
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "openhour-calendar.ics";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── Skeleton loader ───────────────────────────────────────────
@@ -194,10 +255,10 @@ export default function CalendarPage() {
   const [cursor, setCursor] = useState(() => {
     if (typeof window === "undefined") return new Date();
     try {
-      const jumpFlag = window.sessionStorage.getItem("lifeos_calendar_jump_v1");
+      const jumpFlag = window.sessionStorage.getItem("openhour_calendar_jump_v1");
       if (jumpFlag === "1") {
-        window.sessionStorage.removeItem("lifeos_calendar_jump_v1");
-        const raw = window.localStorage.getItem("lifeos_calendar_cursor_v1");
+        window.sessionStorage.removeItem("openhour_calendar_jump_v1");
+        const raw = window.localStorage.getItem("openhour_calendar_cursor_v1");
         if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
           const d = new Date(`${raw}T12:00:00`);
           if (!Number.isNaN(d.getTime())) return d;
@@ -218,6 +279,13 @@ export default function CalendarPage() {
   const [overflowPopover, setOverflowPopover] = useState<string | null>(null);
   // drag preview
   const [dragPreview, setDragPreview] = useState<{ date: string; startMin: number; endMin: number } | null>(null);
+  // mobile responsive
+  const [isMobile, setIsMobile] = useState(false);
+  // series edit modal
+  const [seriesModalBlock, setSeriesModalBlock] = useState<CalendarBlock | null>(null);
+  const [seriesDraftTitle, setSeriesDraftTitle] = useState("");
+  const [seriesDraftStart, setSeriesDraftStart] = useState(0);
+  const [seriesDraftEnd, setSeriesDraftEnd] = useState(0);
 
   // Edit modal drafts
   const [draftTitle, setDraftTitle] = useState("");
@@ -232,6 +300,7 @@ export default function CalendarPage() {
   const startHour = 6, endHour = 24, stepMin = 10, hourRowPx = 56;
   const gridHeightPx = (endHour - startHour) * hourRowPx;
   const timeColPx = 48;
+  const minDayColPx = 120; // minimum width per day column before horizontal scroll kicks in
 
   useEffect(() => {
     setItems(loadCalendar());
@@ -240,16 +309,32 @@ export default function CalendarPage() {
   }, []);
 
   useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 640);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
-    try { window.localStorage.setItem("lifeos_calendar_cursor_v1", isoDateLocal(cursor)); } catch { /* ignore */ }
+    try { window.localStorage.setItem("openhour_calendar_cursor_v1", isoDateLocal(cursor)); } catch { /* ignore */ }
   }, [cursor]);
 
   const weekStart = useMemo(() => startOfWeek(cursor), [cursor]);
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => {
+  const visibleDays = isMobile ? 3 : 7;
+  const days = useMemo(() => Array.from({ length: visibleDays }, (_, i) => {
     const d = new Date(weekStart);
-    d.setDate(d.getDate() + i);
+    // On mobile (3-day view), center on today: find today's offset in the week
+    if (isMobile) {
+      const todayDate = new Date();
+      const todayOffset = (todayDate.getDay() + 6) % 7; // 0=Mon..6=Sun
+      const start = Math.max(0, Math.min(4, todayOffset - 1)); // show today ± 1 day, clamped
+      d.setDate(d.getDate() + start + i);
+    } else {
+      d.setDate(d.getDate() + i);
+    }
     return d;
-  }), [weekStart]);
+  }), [weekStart, visibleDays, isMobile]);
 
   const inWeek = useMemo(() => new Set(days.map((d) => isoDateLocal(d))), [days]);
   const weekBlocks = useMemo(() => items.filter((b) => inWeek.has(b.date)), [items, inWeek]);
@@ -271,8 +356,8 @@ export default function CalendarPage() {
     const r = scrollEl.getBoundingClientRect();
     const gridW = gridEl.offsetWidth;
     const x = clamp(clientX - r.left - timeColPx, 0, gridW - timeColPx - 1);
-    const colW = (gridW - timeColPx) / 7;
-    const dayIdx = clamp(Math.floor(x / colW), 0, 6);
+    const colW = (gridW - timeColPx) / visibleDays;
+    const dayIdx = clamp(Math.floor(x / colW), 0, visibleDays - 1);
     const date = isoDateLocal(days[dayIdx]);
     const y = clamp(clientY - r.top, 0, gridHeightPx);
     const mins = startHour * 60 + (y / hourRowPx) * 60;
@@ -319,6 +404,22 @@ export default function CalendarPage() {
   function openDetail(id: string) { setDetailId(id); }
   function openEditor(id: string) { setDetailId(null); setActiveId(id); }
 
+  function addBlankEvent() {
+    const todayIso = isoDateLocal(new Date());
+    // Default to 9am–10am today
+    const block: CalendarBlock = {
+      id: generateId(),
+      date: todayIso,
+      title: "",
+      startMin: 9 * 60,
+      endMin: 10 * 60,
+      meta: { kind: "manual" },
+    };
+    addCalendarBlock(block);
+    setItems(loadCalendar());
+    setActiveId(block.id);
+  }
+
   function saveEditor() {
     if (!activeId) return;
     const updated = updateCalendarBlock(activeId, {
@@ -340,6 +441,35 @@ export default function CalendarPage() {
     persist(updated);
     setActiveId(null);
     toast(`"${title}" deleted`, "info");
+  }
+
+  function openSeriesModal(block: CalendarBlock) {
+    setDetailId(null);
+    setSeriesModalBlock(block);
+    setSeriesDraftTitle(block.title);
+    setSeriesDraftStart(block.startMin);
+    setSeriesDraftEnd(block.endMin);
+  }
+
+  function saveSeriesModal() {
+    if (!seriesModalBlock?.meta?.seriesId) return;
+    const updated = updateCalendarSeries(seriesModalBlock.meta.seriesId, {
+      title: seriesDraftTitle.trim() || seriesModalBlock.title,
+      startMin: seriesDraftStart,
+      endMin: Math.max(seriesDraftStart + 10, seriesDraftEnd),
+    });
+    persist(updated);
+    setSeriesModalBlock(null);
+    toast("All events in series updated", "success");
+  }
+
+  function deleteSeriesAll() {
+    if (!seriesModalBlock?.meta?.seriesId) return;
+    if (!window.confirm("Delete all events in this recurring series?")) return;
+    const updated = deleteCalendarSeries(seriesModalBlock.meta.seriesId);
+    persist(updated);
+    setSeriesModalBlock(null);
+    toast("Series deleted", "info");
   }
 
   function clearCalendar(scope: "day" | "week" | "month" | "all") {
@@ -493,6 +623,30 @@ export default function CalendarPage() {
                     className="h-9 w-9 flex items-center justify-center rounded-xl border border-black/[0.08] bg-white text-black/60 hover:bg-black/[0.04] hover:scale-105 active:scale-95 transition-all font-bold">→</button>
                 </>
               )}
+              {/* Add event button */}
+              <button
+                onClick={addBlankEvent}
+                className="h-9 flex items-center gap-1.5 rounded-xl bg-[var(--lifeos-pink)] px-3.5 text-xs font-bold text-white shadow-[0_2px_8px_rgba(217,108,125,0.3)] hover:shadow-[0_4px_14px_rgba(217,108,125,0.4)] hover:scale-[1.03] active:scale-[0.97] transition-all"
+                title="Add event manually"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                Add
+              </button>
+
+              {/* Export .ics button */}
+              <button
+                onClick={() => { exportIcal(items); toast("Calendar exported as .ics", "success"); }}
+                className="h-9 flex items-center gap-1.5 rounded-xl border border-black/[0.08] bg-white px-3 text-xs font-bold text-black/55 hover:bg-black/[0.04] hover:scale-[1.02] active:scale-[0.97] transition-all"
+                title="Export calendar as .ics file"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                </svg>
+                Export
+              </button>
+
               <select
                 onChange={(e) => { const v = e.target.value as "" | "day" | "week" | "month" | "all"; if (!v) return; clearCalendar(v); e.currentTarget.value = ""; }}
                 className="h-9 rounded-xl border border-black/[0.08] bg-white px-3 text-xs font-bold text-black/50 hover:bg-black/[0.04] transition-colors outline-none cursor-pointer"
@@ -557,191 +711,183 @@ export default function CalendarPage() {
           {/* ── WEEK VIEW ── */}
           {viewMode === "week" && (
             <>
-              <div className="overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-[0_2px_12px_rgba(0,0,0,0.05)]">
-                <div ref={scrollRef} className="w-full">
-                  {/* Header row */}
-                  <div className="grid border-b border-black/[0.05] bg-black/[0.015]"
-                    style={{ gridTemplateColumns: `${timeColPx}px repeat(7, 1fr)` }}>
-                    <div className="p-2" />
-                    {days.map((d) => {
-                      const iso = isoDateLocal(d);
-                      const isToday = iso === todayISO;
-                      return (
-                        <div key={iso} className="py-2 px-1 text-center">
-                          <div className={`text-[9px] font-bold uppercase tracking-widest ${isToday ? "text-[var(--lifeos-pink)]" : "text-black/30"}`}>
-                            {formatWeekday(d)}
-                          </div>
-                          <div className={`mt-0.5 mx-auto inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${isToday ? "bg-[var(--lifeos-pink)] text-white shadow-[0_2px_8px_rgba(255,107,107,0.35)]" : "text-black/70"}`}>
-                            {d.getDate()}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Due row */}
+              {/* Outer card — overflow-x scroll so columns never squish below minDayColPx */}
+              <div className="rounded-2xl border border-black/[0.06] bg-white shadow-[0_2px_12px_rgba(0,0,0,0.05)] overflow-x-auto overflow-y-hidden">
+                {/* Inner min-width wrapper so the grid can exceed the card width */}
+                <div
+                  ref={scrollRef}
+                  style={{ minWidth: timeColPx + visibleDays * minDayColPx }}
+                >
+                  {/* Column template shared by all rows */}
                   {(() => {
-                    const isDue = (b: CalendarBlock) => b.startMin >= 23 * 60;
-                    const hasDueBlocks = days.some((d) => weekBlocks.some((b) => b.date === isoDateLocal(d) && isDue(b)));
-                    if (!hasDueBlocks) return null;
+                    const colTemplate = `${timeColPx}px repeat(${visibleDays}, minmax(${minDayColPx}px, 1fr))`;
+
                     return (
-                      <div className="grid border-b border-black/[0.07]"
-                        style={{ gridTemplateColumns: `${timeColPx}px repeat(7, 1fr)`, backgroundColor: "rgba(217,108,125,0.06)" }}>
-                        <div className="flex items-center justify-end pr-1.5 py-1.5">
-                          <span className="text-[9px] font-extrabold text-[var(--lifeos-pink)] uppercase tracking-widest leading-none">Due</span>
+                      <>
+                        {/* Header row */}
+                        <div className="grid border-b border-black/[0.05] bg-black/[0.015]"
+                          style={{ gridTemplateColumns: colTemplate }}>
+                          {/* Sticky time-col spacer */}
+                          <div className="sticky left-0 z-20 bg-black/[0.015] p-2" />
+                          {days.map((d) => {
+                            const iso = isoDateLocal(d);
+                            const isToday = iso === todayISO;
+                            return (
+                              <div key={iso} className="py-2 px-1 text-center">
+                                <div className={`text-[9px] font-bold uppercase tracking-widest ${isToday ? "text-[var(--lifeos-pink)]" : "text-black/30"}`}>
+                                  {formatWeekday(d)}
+                                </div>
+                                <div className={`mt-0.5 mx-auto inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${isToday ? "bg-[var(--lifeos-pink)] text-white shadow-[0_2px_8px_rgba(255,107,107,0.35)]" : "text-black/70"}`}>
+                                  {d.getDate()}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                        {days.map((d) => {
-                          const iso = isoDateLocal(d);
-                          const dueBlocks = weekBlocks.filter((b) => b.date === iso && isDue(b));
+
+                        {/* Due row */}
+                        {(() => {
+                          const isDue = (b: CalendarBlock) => b.startMin >= 23 * 60;
+                          const hasDueBlocks = days.some((d) => weekBlocks.some((b) => b.date === isoDateLocal(d) && isDue(b)));
+                          if (!hasDueBlocks) return null;
                           return (
-                            <div key={iso} className="border-l border-black/[0.04] py-1 px-0.5 flex flex-col gap-0.5 min-h-[28px]">
-                              {dueBlocks.map((b) => {
-                                const customColor = (b.meta as any)?.color as string | undefined;
-                                const kind = b.meta?.kind as string | undefined;
-                                const bgColor = customColor ? `${customColor}22` : kind === "syllabus" ? "#fce7eb" : "#fef3c7";
-                                const textColor = customColor ? customColor : kind === "syllabus" ? "#9d1f35" : "#92400e";
-                                const borderColor = customColor ? `${customColor}66` : kind === "syllabus" ? "#f9a8b4" : "#fcd34d";
+                            <div className="grid border-b border-black/[0.07]"
+                              style={{ gridTemplateColumns: colTemplate, backgroundColor: "rgba(217,108,125,0.06)" }}>
+                              <div className="sticky left-0 z-20 flex items-center justify-end pr-1.5 py-1.5" style={{ backgroundColor: "rgba(217,108,125,0.06)" }}>
+                                <span className="text-[9px] font-extrabold text-[var(--lifeos-pink)] uppercase tracking-widest leading-none">Due</span>
+                              </div>
+                              {days.map((d) => {
+                                const iso = isoDateLocal(d);
+                                const dueBlocks = weekBlocks.filter((b) => b.date === iso && isDue(b));
                                 return (
-                                  <button key={b.id} onClick={() => openDetail(b.id)}
-                                    className="w-full rounded-md px-1.5 py-0.5 text-left truncate hover:opacity-80 transition-opacity"
-                                    style={{ backgroundColor: bgColor, color: textColor, border: `1px solid ${borderColor}`, fontSize: 10, fontWeight: 700, lineHeight: 1.4 }}
-                                    title={b.title}>
-                                    {truncTitle(b.title, 20)}
-                                  </button>
+                                  <div key={iso} className="border-l border-black/[0.04] py-1 px-0.5 flex flex-col gap-0.5 min-h-[28px]">
+                                    {dueBlocks.map((b) => {
+                                      const customColor = (b.meta as any)?.color as string | undefined;
+                                      const kind = b.meta?.kind as string | undefined;
+                                      const bgColor = customColor ? `${customColor}22` : kind === "syllabus" ? "#fce7eb" : "#fef3c7";
+                                      const textColor = customColor ? customColor : kind === "syllabus" ? "#9d1f35" : "#92400e";
+                                      const borderColor = customColor ? `${customColor}66` : kind === "syllabus" ? "#f9a8b4" : "#fcd34d";
+                                      return (
+                                        <button key={b.id} onClick={() => openDetail(b.id)}
+                                          className="w-full rounded-md px-1.5 py-0.5 text-left truncate hover:opacity-80 transition-opacity"
+                                          style={{ backgroundColor: bgColor, color: textColor, border: `1px solid ${borderColor}`, fontSize: 10, fontWeight: 700, lineHeight: 1.4 }}
+                                          title={b.title}>
+                                          {truncTitle(b.title, 20)}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
                                 );
                               })}
                             </div>
                           );
-                        })}
-                      </div>
+                        })()}
+
+                        {/* Body */}
+                        <div ref={bodyRef} className="grid"
+                          style={{ gridTemplateColumns: colTemplate }}
+                          onPointerMove={onPointerMove}
+                          onPointerUp={onPointerUp}
+                          onPointerCancel={onPointerUp}>
+                          {/* Time labels — sticky left, absolutely positioned labels */}
+                          <div className="sticky left-0 z-20 relative border-r border-black/[0.04] bg-white" style={{ height: gridHeightPx + 12 }}>
+                            {hours.map((h) => (
+                              <div key={h} className="absolute flex items-center justify-end pr-1.5"
+                                style={{ top: minuteTopPx(h * 60, startHour, hourRowPx) - 5, right: 0, left: 0, height: 10 }}>
+                                <span className="text-[9px] font-semibold text-black/25 tabular-nums leading-none">{pad2(h)}</span>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Day columns */}
+                          {days.map((d) => {
+                            const date = isoDateLocal(d);
+                            const dayBlocks = weekBlocks.filter((b) => b.date === date);
+                            const isToday = date === todayISO;
+                            return (
+                              <div key={date}
+                                className={`relative border-l border-black/[0.04] ${isToday ? "bg-[var(--lifeos-pink)]/[0.02]" : "bg-white"}`}
+                                style={{ height: gridHeightPx + 12 }}
+                                onDoubleClick={(e) => onDoubleClickEmpty(e, date)}
+                                onClick={() => setOverflowPopover(null)}>
+                                {Array.from({ length: endHour - startHour }, (_, i) => startHour + i).map((h) => (
+                                  <div key={h} style={{ height: hourRowPx }}
+                                    className={`border-b ${h % 2 === 0 ? "border-black/[0.05]" : "border-black/[0.025]"}`} />
+                                ))}
+
+                                {/* Drag preview ghost */}
+                                {dragPreview && dragPreview.date === date && (
+                                  <div className="absolute pointer-events-none z-20 left-1 right-1 rounded-lg border-2 border-dashed border-[var(--lifeos-pink)] bg-[var(--lifeos-pink)]/10"
+                                    style={{
+                                      top: minuteTopPx(dragPreview.startMin, startHour, hourRowPx),
+                                      height: Math.max(20, minuteTopPx(dragPreview.endMin, startHour, hourRowPx) - minuteTopPx(dragPreview.startMin, startHour, hourRowPx)),
+                                    }} />
+                                )}
+
+                                {/* Blocks — each laid out with real col/cols positioning */}
+                                {(() => {
+                                  const timedBlocks = dayBlocks.filter((b) => b.startMin < 24 * 60);
+                                  const laid = layoutDayBlocks(timedBlocks);
+                                  return laid.map((b) => {
+                                    const topPx = minuteTopPx(b.startMin, startHour, hourRowPx);
+                                    const heightPx = Math.max(24, minuteTopPx(b.endMin, startHour, hourRowPx) - topPx);
+                                    const timeLabel = `${minsToHHMM(b.startMin)}–${minsToHHMM(b.endMin)}`;
+                                    const kind = b.meta?.kind as string | undefined;
+                                    const customColor = (b.meta as any)?.color as string | undefined;
+                                    const { cls: blockColor, style: blockStyle } = blockColors(kind, customColor);
+                                    const isDragging = dragRef.current?.id === b.id;
+
+                                    // Compact mode when column is narrow (≤ minDayColPx px per lane)
+                                    const laneWidthPx = minDayColPx / b.cols;
+                                    const compact = laneWidthPx < 80;
+                                    const short = truncTitle(b.title, compact ? 10 : 26);
+
+                                    const colW = 100 / b.cols;
+                                    const leftPct = b.col * colW;
+                                    const rightPct = 100 - leftPct - colW;
+                                    const GUTTER = 1;
+
+                                    return (
+                                      <div key={b.id} className="absolute"
+                                        style={{
+                                          top: topPx,
+                                          height: heightPx,
+                                          left: `calc(${leftPct}% + ${b.col === 0 ? 2 : GUTTER}px)`,
+                                          right: `calc(${rightPct}% + ${b.col === b.cols - 1 ? 2 : GUTTER}px)`,
+                                          zIndex: isDragging ? 30 : 10,
+                                        }}>
+                                        <div
+                                          data-block
+                                          className={`w-full h-full cursor-grab select-none overflow-hidden rounded-lg border text-left transition-all hover:shadow-md hover:scale-[1.02] active:cursor-grabbing active:scale-[0.98] ${blockColor} ${isDragging ? "opacity-60 shadow-lg" : ""} ${compact ? "p-0.5" : "p-1"}`}
+                                          style={blockStyle}
+                                          title={b.meta?.fullDetail ? `${b.title}\n${b.meta.fullDetail}` : b.title}
+                                          onPointerDown={(e) => onBlockPointerDown(e, b)}
+                                          onClick={() => !dragRef.current?.moved && openDetail(b.id)}
+                                        >
+                                          <div className={`truncate font-bold leading-tight ${compact ? "text-[9px]" : "text-[10px]"}`}>{short}</div>
+                                          {!compact && heightPx >= 32 && <div className="mt-0.5 text-[9px] opacity-60 leading-tight truncate">{timeLabel}</div>}
+                                        </div>
+                                      </div>
+                                    );
+                                  });
+                                })()}
+                              </div>
+                            );
+                          })}
+                        </div>{/* end body grid */}
+                      </>
                     );
                   })()}
-
-                  {/* Body */}
-                  <div ref={bodyRef} className="grid"
-                    style={{ gridTemplateColumns: `${timeColPx}px repeat(7, 1fr)` }}
-                    onPointerMove={onPointerMove}
-                    onPointerUp={onPointerUp}
-                    onPointerCancel={onPointerUp}>
-                    {/* Time labels */}
-                    <div className="relative border-r border-black/[0.04]" style={{ height: gridHeightPx }}>
-                      {hours.map((h) => (
-                        <div key={h} style={{ height: hourRowPx }} className="flex items-start justify-end pr-1.5 pt-1">
-                          <span className="text-[9px] font-semibold text-black/25 tabular-nums leading-none">{pad2(h)}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Day columns */}
-                    {days.map((d) => {
-                      const date = isoDateLocal(d);
-                      const dayBlocks = weekBlocks.filter((b) => b.date === date);
-                      const isToday = date === todayISO;
-                      return (
-                        <div key={date}
-                          className={`relative border-l border-black/[0.04] ${isToday ? "bg-[var(--lifeos-pink)]/[0.02]" : "bg-white"}`}
-                          style={{ height: gridHeightPx }}
-                          onDoubleClick={(e) => onDoubleClickEmpty(e, date)}
-                          onClick={() => setOverflowPopover(null)}>
-                          {hours.map((h) => (
-                            <div key={h} style={{ height: hourRowPx }}
-                              className={`border-b ${h % 2 === 0 ? "border-black/[0.05]" : "border-black/[0.025]"}`} />
-                          ))}
-
-                          {/* Drag preview ghost */}
-                          {dragPreview && dragPreview.date === date && (
-                            <div className="absolute pointer-events-none z-20 left-1 right-1 rounded-lg border-2 border-dashed border-[var(--lifeos-pink)] bg-[var(--lifeos-pink)]/10"
-                              style={{
-                                top: minuteTopPx(dragPreview.startMin, startHour, hourRowPx),
-                                height: Math.max(20, minuteTopPx(dragPreview.endMin, startHour, hourRowPx) - minuteTopPx(dragPreview.startMin, startHour, hourRowPx)),
-                              }} />
-                          )}
-
-                          {/* Blocks */}
-                          {(() => {
-                            const timedBlocks = dayBlocks.filter((b) => b.startMin < 23 * 60);
-                            const laid = layoutDayBlocks(timedBlocks);
-                            const primaries = laid.filter((b) => b.col === 0);
-                            const overflows = laid.filter((b) => b.col > 0);
-                            const primaryMap = new Map<string, { primary: LayoutBlock; overflow: LayoutBlock[] }>();
-                            for (const p of primaries) primaryMap.set(p.id, { primary: p, overflow: [] });
-                            for (const ov of overflows) {
-                              const parent = primaries.find((p) => p.startMin < ov.endMin && ov.startMin < p.endMin);
-                              if (parent && primaryMap.has(parent.id)) primaryMap.get(parent.id)!.overflow.push(ov);
-                            }
-                            return Array.from(primaryMap.values()).map(({ primary: b, overflow }) => {
-                              const topPx = minuteTopPx(b.startMin, startHour, hourRowPx);
-                              const heightPx = Math.max(24, minuteTopPx(b.endMin, startHour, hourRowPx) - topPx);
-                              const timeLabel = `${minsToHHMM(b.startMin)}–${minsToHHMM(b.endMin)}`;
-                              const short = truncTitle(b.title, 26);
-                              const isPopoverOpen = overflowPopover === b.id;
-                              const kind = b.meta?.kind as string | undefined;
-                              const customColor = (b.meta as any)?.color as string | undefined;
-                              const { cls: blockColor, style: blockStyle } = blockColors(kind, customColor);
-                              const isDragging = dragRef.current?.id === b.id;
-
-                              return (
-                                <div key={b.id} className="absolute"
-                                  style={{ top: topPx, height: heightPx, left: 2, right: 2, zIndex: isDragging ? 30 : 10 }}>
-                                  <div
-                                    data-block
-                                    className={`w-full h-full cursor-grab select-none overflow-hidden rounded-lg border p-1 text-left transition-all hover:shadow-md hover:scale-[1.02] active:cursor-grabbing active:scale-[0.98] ${blockColor} ${isDragging ? "opacity-60 shadow-lg" : ""}`}
-                                    style={blockStyle}
-                                    title={b.meta?.fullDetail ? `${b.title}\n${b.meta.fullDetail}` : b.title}
-                                    onPointerDown={(e) => onBlockPointerDown(e, b)}
-                                    onClick={() => !dragRef.current?.moved && openDetail(b.id)}
-                                  >
-                                    <div className="truncate text-[10px] font-bold leading-tight">{short}</div>
-                                    {heightPx >= 32 && <div className="mt-0.5 text-[9px] opacity-60 leading-tight truncate">{timeLabel}</div>}
-                                  </div>
-
-                                  {overflow.length > 0 && (
-                                    <button
-                                      className="absolute bottom-1 right-1 z-20 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-bold text-white hover:bg-black/80 transition-colors"
-                                      onClick={(e) => { e.stopPropagation(); setOverflowPopover(isPopoverOpen ? null : b.id); }}>
-                                      +{overflow.length}
-                                    </button>
-                                  )}
-
-                                  {isPopoverOpen && (
-                                    <div className="absolute left-0 z-50 mt-1 w-60 rounded-2xl border border-black/[0.08] bg-white shadow-[0_8px_32px_rgba(0,0,0,0.12)] overflow-hidden"
-                                      style={{ top: "100%" }}
-                                      onClick={(e) => e.stopPropagation()}>
-                                      <div className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-black/30 border-b border-black/[0.05]">
-                                        {overflow.length + 1} overlapping
-                                      </div>
-                                      {[b, ...overflow].map((ov) => (
-                                        <button key={ov.id}
-                                          className="flex w-full items-start gap-2.5 px-3 py-3 text-left hover:bg-black/[0.03] transition-colors border-b border-black/[0.04] last:border-b-0"
-                                          onClick={() => { setOverflowPopover(null); openDetail(ov.id); }}>
-                                          <span className={`mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full ${dotColor(ov.meta?.kind as string)}`} />
-                                          <div>
-                                            <div className="text-xs font-semibold text-black/80 leading-tight">{ov.title}</div>
-                                            <div className="text-[10px] text-black/35 mt-0.5">{minsToHHMM(ov.startMin)}–{minsToHHMM(ov.endMin)}</div>
-                                          </div>
-                                        </button>
-                                      ))}
-                                      <button className="w-full px-3 py-2 text-[10px] text-black/30 hover:text-black/60 transition-colors" onClick={() => setOverflowPopover(null)}>Close</button>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            });
-                          })()}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
+                </div>{/* end scrollRef inner */}
+              </div>{/* end outer scroll card */}
 
               {/* Empty state */}
               {items.length === 0 && (
                 <div className="mt-4 rounded-2xl border border-dashed border-black/[0.08] bg-white py-14 text-center">
                   <div className="text-5xl mb-4 select-none">📅</div>
                   <p className="text-base font-bold text-black/40">Your calendar is empty</p>
-                  <p className="mt-1 text-sm text-black/25">Generate a plan on the home screen, then tap <span className="font-semibold">Add to Calendar</span>.</p>
-                  <p className="mt-3 text-xs text-black/20">Or double-click any slot above to create a block manually.</p>
+                  <p className="mt-1 text-sm text-black/25">Generate a plan on the home screen, or click <span className="font-semibold">+ Add</span> above to create an event manually.</p>
+                  <p className="mt-3 text-xs text-black/20">You can also double-click any time slot to create a block.</p>
                 </div>
               )}
             </>
@@ -805,25 +951,112 @@ export default function CalendarPage() {
                     <div className="mt-2 text-xs text-black/30 italic truncate">{b.meta.source}</div>
                   )}
 
+                  {/* Series badge */}
+                  {b.meta?.seriesId && (
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-black/30 bg-black/[0.05] rounded-full px-2 py-0.5">
+                        🔁 Recurring series
+                      </span>
+                    </div>
+                  )}
+
                   {/* Actions */}
-                  <div className="mt-5 flex gap-2">
-                    <button
-                      onClick={() => openEditor(b.id)}
-                      className="flex-1 rounded-2xl bg-[var(--lifeos-pink)] px-4 py-2.5 text-sm font-bold text-white shadow-[0_2px_8px_rgba(255,107,107,0.3)] hover:shadow-[0_4px_16px_rgba(255,107,107,0.4)] hover:scale-[1.02] active:scale-[0.98] transition-all"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => setDetailId(null)}
-                      className="rounded-2xl border border-black/[0.09] bg-white px-4 py-2.5 text-sm font-semibold text-black/60 hover:bg-black/[0.03] hover:scale-[1.01] active:scale-[0.98] transition-all"
-                    >
-                      Close
-                    </button>
+                  <div className="mt-5 space-y-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => openEditor(b.id)}
+                        className="flex-1 rounded-2xl bg-[var(--lifeos-pink)] px-4 py-2.5 text-sm font-bold text-white shadow-[0_2px_8px_rgba(255,107,107,0.3)] hover:shadow-[0_4px_16px_rgba(255,107,107,0.4)] hover:scale-[1.02] active:scale-[0.98] transition-all"
+                      >
+                        Edit this event
+                      </button>
+                      <button
+                        onClick={() => setDetailId(null)}
+                        className="rounded-2xl border border-black/[0.09] bg-white px-4 py-2.5 text-sm font-semibold text-black/60 hover:bg-black/[0.03] hover:scale-[1.01] active:scale-[0.98] transition-all"
+                      >
+                        Close
+                      </button>
+                    </div>
+                    {b.meta?.seriesId && (
+                      <button
+                        onClick={() => openSeriesModal(b)}
+                        className="w-full rounded-2xl border border-black/[0.08] bg-white px-4 py-2.5 text-sm font-semibold text-black/60 hover:bg-black/[0.04] hover:scale-[1.01] active:scale-[0.98] transition-all"
+                      >
+                        Edit all in series
+                      </button>
+                    )}
                   </div>
                 </motion.div>
               </motion.div>
             );
           })()}
+        </AnimatePresence>
+
+        {/* ── Series edit modal ── */}
+        <AnimatePresence>
+          {seriesModalBlock && (
+            <motion.div
+              key="series-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/30 p-0 sm:p-4"
+              onMouseDown={() => setSeriesModalBlock(null)}
+            >
+              <motion.div
+                key="series-modal"
+                initial={{ opacity: 0, y: 40, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 20, scale: 0.96 }}
+                transition={{ type: "spring", stiffness: 380, damping: 28 }}
+                className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl bg-white shadow-[0_24px_64px_rgba(0,0,0,0.18)] p-6"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-base">🔁</span>
+                  <div className="text-lg font-extrabold text-black" style={{ letterSpacing: "-0.025em" }}>Edit recurring series</div>
+                </div>
+                <p className="text-xs text-black/40 mb-5">Changes apply to all events in this series.</p>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-black/35 block mb-1.5">Title</label>
+                    <input
+                      value={seriesDraftTitle}
+                      onChange={(e) => setSeriesDraftTitle(e.target.value)}
+                      className="w-full rounded-2xl border border-black/[0.09] bg-black/[0.02] px-4 py-3 text-sm font-semibold text-black outline-none focus:border-[var(--lifeos-pink)] transition-colors"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-black/35 block mb-1.5">Start time</label>
+                      <input type="time" value={minsToHHMM(seriesDraftStart)} onChange={(e) => setSeriesDraftStart(hhmmToMins(e.target.value))}
+                        className="w-full rounded-2xl border border-black/[0.09] bg-black/[0.02] px-3 py-3 text-sm font-semibold text-black outline-none focus:border-[var(--lifeos-pink)] transition-colors" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-black/35 block mb-1.5">End time</label>
+                      <input type="time" value={minsToHHMM(seriesDraftEnd)} onChange={(e) => setSeriesDraftEnd(hhmmToMins(e.target.value))}
+                        className="w-full rounded-2xl border border-black/[0.09] bg-black/[0.02] px-3 py-3 text-sm font-semibold text-black outline-none focus:border-[var(--lifeos-pink)] transition-colors" />
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-6 flex items-center justify-between gap-2">
+                  <button onClick={deleteSeriesAll}
+                    className="rounded-xl border border-red-200 bg-red-50 px-5 py-2.5 text-sm font-bold text-red-600 hover:bg-red-100 hover:scale-[1.02] active:scale-[0.97] transition-all">
+                    Delete series
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setSeriesModalBlock(null)}
+                      className="rounded-xl border border-black/[0.08] bg-white px-5 py-2.5 text-sm font-bold text-black/60 hover:bg-black/[0.04] hover:scale-[1.01] active:scale-[0.97] transition-all">
+                      Cancel
+                    </button>
+                    <button onClick={saveSeriesModal}
+                      className="rounded-xl bg-[var(--lifeos-pink)] px-5 py-2.5 text-sm font-bold text-white shadow-[0_2px_8px_rgba(255,107,107,0.3)] hover:shadow-[0_4px_14px_rgba(255,107,107,0.4)] hover:scale-[1.02] active:scale-[0.97] transition-all">
+                      Update all
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
         </AnimatePresence>
 
         {/* ── Edit modal ── */}
@@ -857,21 +1090,19 @@ export default function CalendarPage() {
                       className="w-full rounded-2xl border border-black/[0.09] bg-black/[0.02] px-4 py-3 text-sm font-semibold text-black outline-none focus:border-[var(--lifeos-pink)] transition-colors"
                     />
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="col-span-3 sm:col-span-1">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-black/35 block mb-1.5">Day</label>
-                      <select value={draftDate} onChange={(e) => setDraftDate(e.target.value)}
-                        className="w-full rounded-2xl border border-black/[0.09] bg-black/[0.02] px-3 py-3 text-sm font-semibold text-black outline-none focus:border-[var(--lifeos-pink)] transition-colors">
-                        {days.map((d) => { const iso = isoDateLocal(d); return <option key={iso} value={iso}>{formatWeekday(d)} {formatDayLabel(d)}</option>; })}
-                      </select>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-black/35 block mb-1.5">Date</label>
+                      <input type="date" value={draftDate} onChange={(e) => setDraftDate(e.target.value)}
+                        className="w-full rounded-2xl border border-black/[0.09] bg-black/[0.02] px-3 py-3 text-sm font-semibold text-black outline-none focus:border-[var(--lifeos-pink)] transition-colors" />
                     </div>
-                    <div className="col-span-3 sm:col-span-1">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-black/35 block mb-1.5">Start</label>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-black/35 block mb-1.5">Start time</label>
                       <input type="time" value={minsToHHMM(draftStart)} onChange={(e) => setDraftStart(hhmmToMins(e.target.value))}
                         className="w-full rounded-2xl border border-black/[0.09] bg-black/[0.02] px-3 py-3 text-sm font-semibold text-black outline-none focus:border-[var(--lifeos-pink)] transition-colors" />
                     </div>
-                    <div className="col-span-3 sm:col-span-1">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-black/35 block mb-1.5">End</label>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-black/35 block mb-1.5">End time</label>
                       <input type="time" value={minsToHHMM(draftEnd)} onChange={(e) => setDraftEnd(hhmmToMins(e.target.value))}
                         className="w-full rounded-2xl border border-black/[0.09] bg-black/[0.02] px-3 py-3 text-sm font-semibold text-black outline-none focus:border-[var(--lifeos-pink)] transition-colors" />
                     </div>

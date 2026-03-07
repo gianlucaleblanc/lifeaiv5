@@ -56,13 +56,13 @@ function LogoMark() {
     <Link href="/" className="flex items-center gap-2.5 group select-none">
       <div className="h-10 w-10 rounded-[14px] bg-[var(--lifeos-pink)] grid place-items-center shadow-[0_2px_10px_rgba(255,107,107,0.35)] transition-all duration-200 group-hover:shadow-[0_4px_18px_rgba(255,107,107,0.5)] group-hover:scale-105">
         <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" aria-hidden="true">
-          <path d="M12 2l2.09 6.26L21 10l-6.91 1.74L12 18l-2.09-5.74L3 10l6.91-1.74z" fill="white" stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
-          <circle cx="19.5" cy="4" r="1.2" fill="white" opacity="0.7" />
+          <circle cx="12" cy="12" r="8" stroke="white" strokeWidth="1.8" />
+          <path d="M12 8v4l2.5 2.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </div>
       <div className="flex items-baseline gap-0">
-        <span className="text-[22px] font-extrabold text-black" style={{ letterSpacing: "-0.04em" }}>life</span>
-        <span className="text-[22px] font-extrabold text-[var(--lifeos-pink)]" style={{ letterSpacing: "-0.04em" }}>os</span>
+        <span className="text-[22px] font-extrabold text-black" style={{ letterSpacing: "-0.04em" }}>Open</span>
+        <span className="text-[22px] font-extrabold text-[var(--lifeos-pink)]" style={{ letterSpacing: "-0.04em" }}>Hour</span>
       </div>
     </Link>
   );
@@ -76,7 +76,7 @@ function DarkModeToggle() {
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem("lifeos_preferences_v1");
+      const raw = window.localStorage.getItem("openhour_preferences_v1");
       if (raw) {
         const prefs = JSON.parse(raw);
         setDark(!!prefs?.darkMode);
@@ -89,9 +89,12 @@ function DarkModeToggle() {
     setDark(next);
     document.documentElement.classList.toggle("dark", next);
     try {
-      const raw = window.localStorage.getItem("lifeos_preferences_v1");
+      const raw = window.localStorage.getItem("openhour_preferences_v1");
       const prefs = raw ? JSON.parse(raw) : {};
-      window.localStorage.setItem("lifeos_preferences_v1", JSON.stringify({ ...prefs, darkMode: next }));
+      window.localStorage.setItem("openhour_preferences_v1", JSON.stringify({ ...prefs, darkMode: next }));
+      // Re-check accent contrast whenever dark mode changes
+      const accent = window.localStorage.getItem("openhour_accent_color_v1");
+      if (accent) applyAccentDarkAttribute(accent);
     } catch { /* ignore */ }
   }
 
@@ -128,7 +131,7 @@ function StreakPill() {
   useEffect(() => {
     try {
       // Compute streak: consecutive days with at least 1 calendar block, counting back from today
-      const calRaw = window.localStorage.getItem("lifeos_calendar_v1");
+      const calRaw = window.localStorage.getItem("openhour_calendar_v1");
       const calendar: Array<{ date: string }> = (() => {
         try { const p = JSON.parse(calRaw ?? "[]"); return Array.isArray(p) ? p : []; } catch { return []; }
       })();
@@ -170,6 +173,50 @@ const NAV: NavItem[] = [
 ];
 
 // ─────────────────────────────────────────────────────────────
+// Helpers for notification timers
+// ─────────────────────────────────────────────────────────────
+function minsTo12hShell(mins: number): string {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const suffix = h >= 12 ? "pm" : "am";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return m === 0 ? `${h12}${suffix}` : `${h12}:${String(m).padStart(2, "0")}${suffix}`;
+}
+
+function isoDateLocalShell(d: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Accent color dark-mode helper
+// Sets data-accent-dark on <html> when the chosen accent color is
+// too dark to be legible on a dark background (luminance < 0.15)
+// ─────────────────────────────────────────────────────────────
+function relativeLuminance(hex: string): number {
+  const clean = hex.replace("#", "");
+  const r = parseInt(clean.slice(0, 2), 16) / 255;
+  const g = parseInt(clean.slice(2, 4), 16) / 255;
+  const b = parseInt(clean.slice(4, 6), 16) / 255;
+  const toLinear = (c: number) => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
+export function applyAccentDarkAttribute(accent: string) {
+  try {
+    const lum = relativeLuminance(accent);
+    if (lum < 0.15) {
+      document.documentElement.setAttribute("data-accent-dark", "1");
+    } else {
+      document.documentElement.removeAttribute("data-accent-dark");
+    }
+  } catch { /* ignore */ }
+}
+
+// ─────────────────────────────────────────────────────────────
 // AppShell
 // ─────────────────────────────────────────────────────────────
 export default function AppShell({ children }: { children: ReactNode }) {
@@ -179,15 +226,55 @@ export default function AppShell({ children }: { children: ReactNode }) {
   // Apply dark mode from saved preferences on first mount
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem("lifeos_preferences_v1");
+      const raw = window.localStorage.getItem("openhour_preferences_v1");
       if (raw) {
         const prefs = JSON.parse(raw);
         if (prefs?.darkMode === true) document.documentElement.classList.add("dark");
         else document.documentElement.classList.remove("dark");
       }
       // Apply saved accent color
-      const accent = window.localStorage.getItem("lifeos_accent_color_v1");
-      if (accent) document.documentElement.style.setProperty("--lifeos-pink", accent);
+      const accent = window.localStorage.getItem("openhour_accent_color_v1");
+      if (accent) {
+        document.documentElement.style.setProperty("--lifeos-pink", accent);
+        applyAccentDarkAttribute(accent);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // Schedule browser notification timers for today's events (15-min reminders)
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("openhour_preferences_v1");
+      const prefs = raw ? JSON.parse(raw) : {};
+      if (!prefs?.notificationsEnabled) return;
+      if (typeof Notification === "undefined") return;
+      if (Notification.permission !== "granted") return;
+
+      const calRaw = window.localStorage.getItem("openhour_calendar_v1");
+      const calendar: Array<{ id: string; date: string; title: string; startMin: number; endMin: number }> =
+        (() => { try { const p = JSON.parse(calRaw ?? "[]"); return Array.isArray(p) ? p : []; } catch { return []; } })();
+
+      const today = isoDateLocalShell(new Date());
+      const todayBlocks = calendar.filter((b) => b.date === today);
+      const now = new Date();
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+
+      const timers: ReturnType<typeof setTimeout>[] = [];
+      todayBlocks.forEach((block) => {
+        const msUntil = (block.startMin - 15 - nowMin) * 60_000;
+        if (msUntil < 0) return; // already passed
+        timers.push(setTimeout(() => {
+          try {
+            new Notification(`Starting soon: ${block.title}`, {
+              body: `In 15 minutes at ${minsTo12hShell(block.startMin)}`,
+              icon: "/icon-192.png",
+              tag: `lifeos-reminder-${block.id}`,
+            });
+          } catch { /* Notification may fail silently */ }
+        }, msUntil));
+      });
+
+      return () => timers.forEach(clearTimeout);
     } catch { /* ignore */ }
   }, []);
 

@@ -1,8 +1,135 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { loadPreferences, loadProfile, savePreferences, loadOnboardingProfile, type UserPreferences, type UserProfile } from "../lib/storage";
 import { useToast } from "../components/Toast";
+import { applyAccentDarkAttribute } from "../components/AppShell";
+
+// ── Profile Picture Component ────────────────────────────────
+function ProfilePicture({
+  userName,
+  photoUrl,
+  accentColor,
+  onPhotoChange,
+}: {
+  userName: string | null;
+  photoUrl: string | null;
+  accentColor: string;
+  onPhotoChange: (url: string | null) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+
+  const initials = userName
+    ? userName.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)
+    : "?";
+
+  function handleFile(file: File) {
+    if (!file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      if (result) {
+        onPhotoChange(result);
+        localStorage.setItem("openhour_profile_photo_v1", result);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) handleFile(file);
+    setShowMenu(false);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleFile(file);
+  }
+
+  function removePhoto() {
+    onPhotoChange(null);
+    localStorage.removeItem("openhour_profile_photo_v1");
+    setShowMenu(false);
+  }
+
+  return (
+    <div className="relative flex-shrink-0">
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleInputChange}
+      />
+
+      {/* Avatar */}
+      <div
+        className={`relative h-20 w-20 rounded-3xl overflow-hidden cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95 shadow-[0_4px_20px_rgba(0,0,0,0.12)] ${dragging ? "ring-2 ring-offset-2 ring-[var(--lifeos-pink)] scale-105" : ""}`}
+        onClick={() => setShowMenu((v) => !v)}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+        style={{ background: photoUrl ? undefined : `linear-gradient(135deg, ${accentColor}, ${accentColor}99)` }}
+      >
+        {photoUrl ? (
+          <img src={photoUrl} alt="Profile" className="h-full w-full object-cover" />
+        ) : (
+          <div className="h-full w-full flex items-center justify-center">
+            <span className="text-white text-2xl font-black select-none" style={{ letterSpacing: "-0.02em" }}>
+              {initials}
+            </span>
+          </div>
+        )}
+
+        {/* Hover overlay */}
+        <div className="absolute inset-0 bg-black/0 hover:bg-black/25 transition-colors duration-200 flex items-center justify-center">
+          <svg className="opacity-0 hover:opacity-100 transition-opacity w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </div>
+      </div>
+
+      {/* Online indicator */}
+      <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full bg-emerald-400 border-2 border-white shadow-sm" />
+
+      {/* Edit menu */}
+      {showMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
+          <div className="absolute left-0 top-[88px] z-50 w-44 rounded-2xl bg-white border border-black/[0.08] shadow-xl overflow-hidden">
+            <button
+              onClick={() => { fileInputRef.current?.click(); }}
+              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold text-black/70 hover:bg-black/[0.04] transition-colors text-left"
+            >
+              <span className="text-base">📷</span> Upload photo
+            </button>
+            <button
+              onClick={() => { fileInputRef.current?.click(); }}
+              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold text-black/70 hover:bg-black/[0.04] transition-colors text-left"
+            >
+              <span className="text-base">🖼️</span> Choose from library
+            </button>
+            {photoUrl && (
+              <button
+                onClick={removePhoto}
+                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold text-red-500 hover:bg-red-50 transition-colors text-left border-t border-black/[0.05]"
+              >
+                <span className="text-base">🗑️</span> Remove photo
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 function weekdayShort(yyyyMmDd: string) {
   const [y, m, d] = yyyyMmDd.split("-").map(Number);
@@ -39,16 +166,16 @@ type Badge = { emoji: string; title: string; desc: string; earned: boolean };
 function computeBadges(profile: UserProfile): Badge[] {
   const avgPct = Math.round((profile.avgCompletion ?? 0) * 100);
   const days = profile.daysTracked ?? 0;
-  const calRaw = typeof window !== "undefined" ? window.localStorage.getItem("lifeos_calendar_v1") : null;
+  const calRaw = typeof window !== "undefined" ? window.localStorage.getItem("openhour_calendar_v1") : null;
   const calCount = (() => {
     try { const p = JSON.parse(calRaw ?? "[]"); return Array.isArray(p) ? p.length : 0; } catch { return 0; }
   })();
   return [
     { emoji: "🎓", title: "First Import", desc: "Import your first syllabus", earned: calCount > 0 },
     { emoji: "📅", title: "First Plan", desc: "Generate your first plan", earned: days >= 1 },
-    { emoji: "🔥", title: "3-Day Streak", desc: "Use LifeOS 3 days in a row", earned: days >= 3 },
+    { emoji: "🔥", title: "3-Day Streak", desc: "Use OpenHour 3 days in a row", earned: days >= 3 },
     { emoji: "⭐", title: "Perfect Day", desc: "Hit 100% completion", earned: (profile.last7 ?? []).some((d) => d.completion >= 1) },
-    { emoji: "🚀", title: "7-Day Streak", desc: "Use LifeOS 7 days in a row", earned: days >= 7 },
+    { emoji: "🚀", title: "7-Day Streak", desc: "Use OpenHour 7 days in a row", earned: days >= 7 },
     { emoji: "📚", title: "Scholar", desc: "Add 20+ calendar blocks", earned: calCount >= 20 },
     { emoji: "💪", title: "Consistent", desc: "Average 70%+ completion", earned: avgPct >= 70 },
     { emoji: "🌟", title: "30-Day Pro", desc: "30 consecutive days tracked", earned: days >= 30 },
@@ -62,6 +189,7 @@ export default function ProfilePage() {
   const [accentColor, setAccentColor] = useState("#d96c7d");
   const [streak, setStreak] = useState(0);
   const [userName, setUserName] = useState<string | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [showSoonExpanded, setShowSoonExpanded] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
@@ -74,10 +202,13 @@ export default function ProfilePage() {
       setUserName(onboarding.name.split(" ")[0]);
     }
     // Load accent color
-    const saved = window.localStorage.getItem("lifeos_accent_color_v1");
+    const saved = window.localStorage.getItem("openhour_accent_color_v1");
     if (saved) setAccentColor(saved);
+    // Load profile photo
+    const savedPhoto = window.localStorage.getItem("openhour_profile_photo_v1");
+    if (savedPhoto) setPhotoUrl(savedPhoto);
     // Compute streak
-    const calRaw = window.localStorage.getItem("lifeos_calendar_v1");
+    const calRaw = window.localStorage.getItem("openhour_calendar_v1");
     const calendar: Array<{ date: string }> = (() => {
       try { const p = JSON.parse(calRaw ?? "[]"); return Array.isArray(p) ? p : []; } catch { return []; }
     })();
@@ -117,14 +248,36 @@ export default function ProfilePage() {
     const updated = { ...prefs, [key]: !prefs[key] };
     setPrefs(updated);
     savePreferences(updated);
-    if (key === "darkMode") document.documentElement.classList.toggle("dark", updated.darkMode);
+    if (key === "darkMode") {
+      document.documentElement.classList.toggle("dark", updated.darkMode);
+      // Re-apply accent dark attribute whenever dark mode changes
+      const accent = window.localStorage.getItem("openhour_accent_color_v1");
+      if (accent) applyAccentDarkAttribute(accent);
+    }
     toast(key === "darkMode" ? (updated.darkMode ? "Dark mode on" : "Light mode on") : (updated.suggestionsEnabled ? "AI suggestions on" : "AI suggestions off"), "info");
+  }
+
+  async function toggleNotifications() {
+    if (!prefs) return;
+    const enabling = !prefs.notificationsEnabled;
+    if (enabling && typeof Notification !== "undefined" && Notification.permission !== "granted") {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") {
+        toast("Permission denied — enable notifications in browser settings", "error");
+        return;
+      }
+    }
+    const updated = { ...prefs, notificationsEnabled: enabling };
+    setPrefs(updated);
+    savePreferences(updated);
+    toast(enabling ? "15-min reminders on" : "Reminders off", "info");
   }
 
   function changeAccent(color: string) {
     setAccentColor(color);
     document.documentElement.style.setProperty("--lifeos-pink", color);
-    window.localStorage.setItem("lifeos_accent_color_v1", color);
+    window.localStorage.setItem("openhour_accent_color_v1", color);
+    applyAccentDarkAttribute(color);
     toast("Accent color updated", "success");
   }
 
@@ -138,12 +291,12 @@ export default function ProfilePage() {
     >
       {/* ── Profile header ── */}
       <div className="flex items-center gap-5 mb-8">
-        <div className="relative flex-shrink-0">
-          <div className="h-20 w-20 rounded-3xl bg-gradient-to-br from-[var(--lifeos-pink)] to-[#ff8e8e] shadow-[0_4px_16px_rgba(255,107,107,0.35)] grid place-items-center">
-            <span className="text-3xl select-none">😊</span>
-          </div>
-          <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full bg-emerald-400 border-2 border-white shadow-sm" />
-        </div>
+        <ProfilePicture
+          userName={userName}
+          photoUrl={photoUrl}
+          accentColor={accentColor}
+          onPhotoChange={setPhotoUrl}
+        />
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-extrabold text-black" style={{ letterSpacing: "-0.03em" }}>
             {userName ? `Hey, ${userName}` : "Your Profile"}
@@ -156,6 +309,7 @@ export default function ProfilePage() {
               {profile.daysTracked} day{profile.daysTracked !== 1 ? "s" : ""} tracked
             </span>
           </div>
+          <p className="mt-1.5 text-[11px] text-black/30 font-medium">Tap your photo to change it</p>
         </div>
       </div>
 
@@ -271,7 +425,7 @@ export default function ProfilePage() {
             <span className="text-xl flex-shrink-0">🎨</span>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold text-black/80">Accent color</div>
-              <div className="text-xs text-black/40">Personalise your LifeOS theme</div>
+              <div className="text-xs text-black/40">Personalise your OpenHour theme</div>
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
               {ACCENT_COLORS.map(({ color, label }) => (
@@ -311,6 +465,16 @@ export default function ProfilePage() {
             {prefs !== null && <Toggle enabled={prefs.suggestionsEnabled} onToggle={() => togglePref("suggestionsEnabled")} />}
           </div>
 
+          {/* Notifications toggle */}
+          <div className="flex items-center gap-4 rounded-xl px-4 py-3 hover:bg-black/[0.03] transition-colors">
+            <span className="text-xl flex-shrink-0">🔔</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-black/80">Notifications</div>
+              <div className="text-xs text-black/40">15-min reminders for today&apos;s events</div>
+            </div>
+            {prefs !== null && <Toggle enabled={prefs.notificationsEnabled ?? false} onToggle={toggleNotifications} />}
+          </div>
+
           {/* Coming soon — collapsed row */}
           <button
             onClick={() => setShowSoonExpanded((v) => !v)}
@@ -319,7 +483,7 @@ export default function ProfilePage() {
             <span className="text-xl flex-shrink-0">🚀</span>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold text-black/80">Coming soon</div>
-              <div className="text-xs text-black/40">Notifications, Google Calendar sync &amp; more</div>
+              <div className="text-xs text-black/40">Google Calendar sync &amp; more</div>
             </div>
             <span className={`text-black/25 transition-transform duration-200 ${showSoonExpanded ? "rotate-90" : ""}`}>›</span>
           </button>
@@ -328,8 +492,8 @@ export default function ProfilePage() {
               <div className="flex items-center gap-3 px-4 py-3 opacity-50">
                 <span className="text-base">🔔</span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-semibold text-black/70">Notifications</div>
-                  <div className="text-[11px] text-black/40">Reminders for upcoming events</div>
+                  <div className="text-xs font-semibold text-black/70">Reminders (advanced)</div>
+                  <div className="text-[11px] text-black/40">Custom reminder times &amp; recurring schedules</div>
                 </div>
                 <span className="text-[10px] text-black/30 font-bold bg-black/[0.06] rounded-full px-2 py-0.5">Soon</span>
               </div>
@@ -373,7 +537,7 @@ export default function ProfilePage() {
                   </div>
                   <div>
                     <div className="text-base font-bold text-black/80">Data &amp; Privacy</div>
-                    <div className="text-xs text-black/40">How LifeOS stores your information</div>
+                    <div className="text-xs text-black/40">How OpenHour stores your information</div>
                   </div>
                 </div>
                 <div className="space-y-3 text-sm text-black/60 leading-relaxed">

@@ -30,13 +30,13 @@ function isIsoDate(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-function normalizeSuggestions(raw: any, anchors: Anchor[] = [], maxPerAnchor = 5): Suggested[] {
+function normalizeSuggestions(raw: any, anchors: Anchor[] = [], maxPerAnchor = 3): Suggested[] {
   const arr = Array.isArray(raw?.suggestions) ? raw.suggestions : [];
   const out: Suggested[] = [];
 
   // Track how many suggestions we've emitted per anchor
   const anchorCount: Record<number, number> = {};
-  const totalMax = Math.min(anchors.length * maxPerAnchor, 15);
+  const totalMax = Math.min(anchors.length * maxPerAnchor, 3);
 
   for (const it of arr) {
     if (!it || typeof it !== "object") continue;
@@ -124,7 +124,7 @@ export async function POST(req: Request) {
     }
 
     const isMultiAnchor = anchors.length > 1;
-    const maxPerAnchor = isMultiAnchor ? 4 : 5;
+    const maxPerAnchor = isMultiAnchor ? 2 : 3;
 
     // Build a detailed anchor list with index labels
     const anchorStr = anchors.length > 0
@@ -273,7 +273,7 @@ export async function POST(req: Request) {
       "- Always compute times as MINUTES FROM MIDNIGHT (e.g. 9am = 540, 2pm = 840)",
       "- Respect daily boundaries: 8am (480) to 10pm (1320)",
       "- Multi-day prep (pack, research) uses a prior date with a reasonable daytime hour",
-      `- Target ${maxPerAnchor} suggestions per anchor event${isMultiAnchor ? ` (${anchors.length} anchors = ~${anchors.length * maxPerAnchor} total)` : ""}`,
+      `- Return at most ${maxPerAnchor} suggestions per anchor event. Total output MUST NOT exceed 3 suggestions.`,
       "",
       "Return ONLY valid JSON: { suggestions: Suggested[] }",
       "",

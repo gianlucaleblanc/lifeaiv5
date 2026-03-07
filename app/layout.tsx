@@ -1,12 +1,28 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import AppShell from "./components/AppShell";
 import OnboardingWrapper from "./components/OnboardingWrapper";
 import { ToastProvider } from "./components/Toast";
 
 export const metadata: Metadata = {
-  title: "LifeOS",
-  description: "Turn natural-language intentions into a grounded daily plan.",
+  title: "OpenHour",
+  description: "Turn natural language into your daily plan.",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "OpenHour",
+  },
+  formatDetection: {
+    telephone: false,
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#ec4899",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
 };
 
 export default function RootLayout({
@@ -16,6 +32,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <meta name="mobile-web-app-capable" content="yes" />
+      </head>
       <body className="antialiased">
         <ToastProvider>
           <OnboardingWrapper>

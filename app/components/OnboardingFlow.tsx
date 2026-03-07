@@ -78,10 +78,13 @@ export default function OnboardingFlow({ onComplete }: { onComplete: () => void 
         {step === 0 && (
           <div className="flex flex-col items-center text-center max-w-md animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="mb-6 h-20 w-20 rounded-3xl bg-[var(--lifeos-pink)] grid place-items-center shadow-lg">
-              <span className="text-white text-4xl font-extrabold" style={{ letterSpacing: "-0.02em" }}>L</span>
+              <svg viewBox="0 0 24 24" className="h-10 w-10" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="8" stroke="white" strokeWidth="1.8" />
+                <path d="M12 8v4l2.5 2.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold text-black" style={{ letterSpacing: "-0.025em" }}>
-              Welcome to LifeOS
+              Welcome to OpenHour
             </h1>
             <p className="mt-3 text-base text-black/60 leading-relaxed">
               Your personal AI planner. Let's take 60 seconds to set up your experience.
@@ -102,7 +105,7 @@ export default function OnboardingFlow({ onComplete }: { onComplete: () => void 
             <h2 className="text-2xl sm:text-3xl font-extrabold text-black mb-2" style={{ letterSpacing: "-0.02em" }}>
               What's your name?
             </h2>
-            <p className="text-sm text-black/50 mb-8">LifeOS will use this to greet you and personalize suggestions.</p>
+            <p className="text-sm text-black/50 mb-8">OpenHour will use this to greet you and personalize suggestions.</p>
             <input
               autoFocus
               type="text"
@@ -129,7 +132,7 @@ export default function OnboardingFlow({ onComplete }: { onComplete: () => void 
             <h2 className="text-2xl sm:text-3xl font-extrabold text-black mb-2" style={{ letterSpacing: "-0.02em" }}>
               What best describes you?
             </h2>
-            <p className="text-sm text-black/50 mb-8">This helps LifeOS tailor your plans and event suggestions.</p>
+            <p className="text-sm text-black/50 mb-8">This helps OpenHour tailor your plans and event suggestions.</p>
             <div className="grid grid-cols-2 gap-3 w-full">
               {ROLES.map((r) => (
                 <button
@@ -165,7 +168,7 @@ export default function OnboardingFlow({ onComplete }: { onComplete: () => void 
             <h2 className="text-2xl sm:text-3xl font-extrabold text-black mb-2" style={{ letterSpacing: "-0.02em" }}>
               When do you usually wake up?
             </h2>
-            <p className="text-sm text-black/50 mb-10">LifeOS uses this to avoid scheduling before you're up.</p>
+            <p className="text-sm text-black/50 mb-10">OpenHour uses this to avoid scheduling before you're up.</p>
             <div className="flex flex-col items-center gap-4 w-full max-w-xs">
               <div className="text-4xl font-extrabold text-[var(--lifeos-pink)]" style={{ letterSpacing: "-0.02em" }}>
                 {hourLabel(wakeHour)}
@@ -201,7 +204,7 @@ export default function OnboardingFlow({ onComplete }: { onComplete: () => void 
             <h2 className="text-2xl sm:text-3xl font-extrabold text-black mb-2" style={{ letterSpacing: "-0.02em" }}>
               When do you aim to be in bed?
             </h2>
-            <p className="text-sm text-black/50 mb-10">LifeOS respects your sleep and won't schedule past this time.</p>
+            <p className="text-sm text-black/50 mb-10">OpenHour respects your sleep and won't schedule past this time.</p>
             <div className="flex flex-col items-center gap-4 w-full max-w-xs">
               <div className="text-4xl font-extrabold text-[var(--lifeos-pink)]" style={{ letterSpacing: "-0.02em" }}>
                 {hourLabel(sleepHour % 24)}
@@ -245,7 +248,7 @@ export default function OnboardingFlow({ onComplete }: { onComplete: () => void 
               You're all set{name.trim() ? `, ${name.trim().split(" ")[0]}` : ""}!
             </h2>
             <p className="text-sm text-black/50 mb-2">
-              LifeOS is ready to plan your days, import your syllabi, and help you stay on top of everything.
+              OpenHour is ready to plan your days, import your syllabi, and help you stay on top of everything.
             </p>
             <p className="text-sm text-black/40 mb-10">
               Wake time: <span className="font-semibold text-black/60">{hourLabel(wakeHour)}</span>

@@ -1,4 +1,4 @@
-export const HISTORY_KEY = "lifeos_history_v1";
+export const HISTORY_KEY = "openhour_history_v1";
 
 function generateId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -11,7 +11,7 @@ function generateId(): string {
 }
 
 // --- Custom event keywords (learned locally) ---
-export const CUSTOM_EVENT_KEYWORDS_KEY = "lifeos_custom_event_keywords_v1";
+export const CUSTOM_EVENT_KEYWORDS_KEY = "openhour_custom_event_keywords_v1";
 
 export function loadCustomEventKeywords(): string[] {
   if (typeof window === "undefined") return [];
@@ -94,7 +94,7 @@ export function getLatestHistoryItem(): HistoryItem | null {
 export type DoneMap = Record<string, boolean>;
 
 export function doneKey(historyId: string) {
-  return `lifeos_done_v1:${historyId}`;
+  return `openhour_done_v1:${historyId}`;
 }
 
 export function loadDone(historyId: string): DoneMap {
@@ -120,7 +120,7 @@ export type UserProfile = {
   last7: { date: string; completion: number }[];
 };
 
-const PROFILE_KEY = "lifeos_profile_v1";
+const PROFILE_KEY = "openhour_profile_v1";
 
 export function loadProfile(): UserProfile {
   if (typeof window === "undefined") return { daysTracked: 0, avgCompletion: 0, last7: [] };
@@ -135,7 +135,7 @@ export function loadProfile(): UserProfile {
     })();
 
     // Compute daysTracked = number of distinct dates with at least one calendar block
-    const calRaw = window.localStorage.getItem("lifeos_calendar_v1");
+    const calRaw = window.localStorage.getItem("openhour_calendar_v1");
     const calendar: Array<{ date: string }> = (() => {
       try { const p = JSON.parse(calRaw ?? "[]"); return Array.isArray(p) ? p : []; } catch { return []; }
     })();
@@ -187,7 +187,7 @@ export type OnboardingProfile = {
   completedAt: string; // ISO
 };
 
-const ONBOARDING_KEY = "lifeos_onboarding_v1";
+const ONBOARDING_KEY = "openhour_onboarding_v1";
 
 export function saveOnboardingProfile(profile: OnboardingProfile) {
   if (typeof window === "undefined") return;
@@ -241,13 +241,15 @@ export type UserPreferences = {
   // App settings
   darkMode: boolean;                   // dark mode toggle
   suggestionsEnabled: boolean;         // whether to show AI prep suggestions after scheduling
+  notificationsEnabled: boolean;       // 15-min browser reminders for today's events
+  suggestPrefs: Record<string, boolean>; // per-context suggestion opt-in/out e.g. { workout: true, coffee: false }
 
   // Meta
   totalFeedbackSessions: number;
   lastUpdated: string;                 // ISO timestamp
 };
 
-const PREFERENCES_KEY = "lifeos_preferences_v1";
+const PREFERENCES_KEY = "openhour_preferences_v1";
 
 export function loadPreferences(): UserPreferences {
   const def: UserPreferences = {
@@ -260,6 +262,8 @@ export function loadPreferences(): UserPreferences {
     styleNotes: [],
     darkMode: false,
     suggestionsEnabled: true,
+    notificationsEnabled: false,
+    suggestPrefs: {},
     totalFeedbackSessions: 0,
     lastUpdated: new Date().toISOString(),
   };
@@ -311,7 +315,7 @@ export type FeedbackEntry = {
   prompt?: string;        // the original input that generated this block
 };
 
-const FEEDBACK_KEY = "lifeos_feedback_v1";
+const FEEDBACK_KEY = "openhour_feedback_v1";
 
 export function loadFeedback(): FeedbackEntry[] {
   if (typeof window === "undefined") return [];
@@ -418,10 +422,12 @@ export type CalendarBlock = {
     source?: string;
     fullDetail?: string; // original user input, shown on hover in calendar
     color?: string;      // user-picked hex color (syllabus course color)
+    seriesId?: string;   // UUID shared by all blocks in a recurring series
+    seriesRule?: string; // e.g. "weekly:MO,WE,FR" for display/editing
   };
 };
 
-const CALENDAR_KEY = "lifeos_calendar_v1";
+const CALENDAR_KEY = "openhour_calendar_v1";
 
 export function loadCalendar(): CalendarBlock[] {
   if (typeof window === "undefined") return [];
@@ -451,6 +457,9 @@ export function saveCalendar(items: CalendarBlock[]) {
             source: safeSource,
             // Preserve user-picked course color
             color: (b.meta as any)?.color ?? undefined,
+            // Preserve recurring series identifiers
+            seriesId: b.meta.seriesId ?? undefined,
+            seriesRule: b.meta.seriesRule ?? undefined,
           }
         : undefined;
       return meta ? { ...b, meta } : b;
@@ -489,6 +498,32 @@ export function deleteCalendarBlock(id: string) {
   // so a new plan doesn't keep accumulating incorrect/duplicate blocks.
   const allRaw = loadCalendar();
   const updated = allRaw.filter((b) => b.id !== id);
+  saveCalendar(updated);
+  return updated;
+}
+
+/** Delete every block that belongs to a recurring series. */
+export function deleteCalendarSeries(seriesId: string): CalendarBlock[] {
+  const updated = loadCalendar().filter((b) => b.meta?.seriesId !== seriesId);
+  saveCalendar(updated);
+  return updated;
+}
+
+/** Patch title/startMin/endMin across every block in a recurring series. */
+export function updateCalendarSeries(
+  seriesId: string,
+  patch: Partial<Pick<CalendarBlock, "title" | "startMin" | "endMin">>
+): CalendarBlock[] {
+  const updated = loadCalendar().map((b) => {
+    if (b.meta?.seriesId !== seriesId) return b;
+    const next = { ...b, ...patch };
+    // Ensure endMin stays after startMin when only one is provided
+    if (patch.startMin !== undefined && patch.endMin === undefined) {
+      const dur = b.endMin - b.startMin;
+      next.endMin = patch.startMin + dur;
+    }
+    return next;
+  });
   saveCalendar(updated);
   return updated;
 }
@@ -1165,6 +1200,76 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
   // NOTE: a single input can mention events on different weekdays (e.g. "flight on Friday").
   // We handle explicit weekday-tagged items by scheduling them onto the next occurrence
   // of that weekday, instead of incorrectly forcing everything onto history.createdAt.
+
+  // ── FULL-DAY PLAN SHORTCUT ────────────────────────────────────────────────────────────────
+  // When the input was produced by the DayPlanModal ("Plan my whole day today."), we bypass
+  // ALL the normal NLP extraction logic and instead directly convert the AI's schedule[]
+  // array (which already has exact clock times) into calendar blocks. This avoids the issue
+  // where hasExplicitAnchor=true suppresses schedule-derived titles.
+  if ((history.input ?? "").startsWith("Plan my whole day today.")) {
+    const now = opts?.now ?? new Date();
+    const baseDate = isoDateLocal(now);
+    const allRaw = loadCalendar();
+    // Remove existing "plan" blocks from today so we get a clean slate
+    const base = allRaw.filter((b) => !(b.date === baseDate && b.meta?.kind === "plan"));
+
+    const schedule = history.plan?.schedule ?? [];
+    const newBlocks: CalendarBlock[] = [];
+
+    // Helper: parse "7:00 AM" / "11:30 PM" / "10:30 am" → minutes since midnight
+    function parseScheduleTime(t: string): number | null {
+      const m = String(t ?? "").match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
+      if (!m) return null;
+      let h = parseInt(m[1], 10);
+      const min = m[2] ? parseInt(m[2], 10) : 0;
+      const ap = m[3].toLowerCase();
+      if (h === 12) h = ap === "am" ? 0 : 12;
+      else if (ap === "pm") h += 12;
+      return h * 60 + min;
+    }
+
+    // Parse start times
+    const parsed: { title: string; startMin: number }[] = [];
+    for (const slot of schedule) {
+      const startMin = parseScheduleTime(slot.time ?? "");
+      if (startMin === null) continue;
+      const items: string[] = Array.isArray(slot.plan) ? slot.plan : [];
+      for (const item of items) {
+        const title = normalizeEventTitle(String(item ?? "").slice(0, 80));
+        if (!title) continue;
+        parsed.push({ title, startMin });
+      }
+    }
+
+    // Build blocks — end time = next block's start, or start + 60 for last
+    for (let i = 0; i < parsed.length; i++) {
+      const { title, startMin } = parsed[i];
+      // End time: next block start, or start + 60 min
+      const nextStart = parsed[i + 1]?.startMin;
+      const endMin = nextStart !== undefined && nextStart > startMin
+        ? Math.min(nextStart, startMin + 120) // cap at 2 hours max per block
+        : Math.min(startMin + 60, 24 * 60);
+      newBlocks.push({
+        id: generateId(),
+        date: baseDate,
+        title,
+        startMin,
+        endMin,
+        sourceHistoryId: history.id,
+        meta: { kind: "plan" },
+      });
+    }
+
+    const merged = [...newBlocks, ...base];
+    return {
+      baseDate,
+      hasWeekdayInInput: false,
+      affectedDates: [baseDate],
+      proposed: newBlocks,
+      merged,
+    };
+  }
+  // ── END FULL-DAY PLAN SHORTCUT ────────────────────────────────────────────────────────────
 
   const allRaw = loadCalendar();
 

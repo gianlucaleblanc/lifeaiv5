@@ -14,6 +14,29 @@
   /* App defaults */
   --background: #ffffff;
   --foreground: var(--lifeos-ink);
+
+  /* Shadow system */
+  --shadow-card: 0 2px 16px rgba(0,0,0,0.06), 0 8px 40px rgba(0,0,0,0.04);
+  --shadow-card-hover: 0 4px 24px rgba(0,0,0,0.1), 0 12px 48px rgba(0,0,0,0.07);
+  --shadow-modal: 0 24px 64px rgba(0,0,0,0.18);
+
+  /* Surface tokens */
+  --surface-base: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-overlay: #ffffff;
+  --surface-subtle: rgba(0,0,0,0.025);
+  --surface-hover: rgba(0,0,0,0.04);
+  --surface-active: rgba(0,0,0,0.07);
+
+  /* Divider / separator */
+  --divider: rgba(0,0,0,0.08);
+
+  /* Text tokens */
+  --text-primary: rgba(0,0,0,0.88);
+  --text-secondary: rgba(0,0,0,0.50);
+  --text-tertiary: rgba(0,0,0,0.35);
+  --text-faint: rgba(0,0,0,0.22);
+  --text-placeholder: rgba(0,0,0,0.22);
 }
 
 @theme inline {
@@ -32,20 +55,43 @@
 
 html.dark {
   /* Flip Tailwind's built-in black/white tokens */
-  --color-black: #f0ecee;
-  --color-white: #1e1820;
+  --color-black: #ede8eb;
+  --color-white: #201b1e;
 
   /* LifeOS brand overrides */
-  --lifeos-cream: #1a1014;
-  --lifeos-card: #1e1820;
-  --lifeos-ink: #f0ecee;
-  --lifeos-muted: rgba(240, 236, 238, 0.6);
-  --lifeos-border: rgba(240, 236, 238, 0.14);
-  --lifeos-border-soft: rgba(240, 236, 238, 0.08);
+  --lifeos-cream: #161113;
+  --lifeos-card: #201b1e;
+  --lifeos-ink: #ede8eb;
+  --lifeos-muted: rgba(237, 232, 235, 0.6);
+  --lifeos-border: rgba(237, 232, 235, 0.13);
+  --lifeos-border-soft: rgba(237, 232, 235, 0.07);
 
   /* App background / foreground */
-  --background: #131013;
-  --foreground: #f0ecee;
+  --background: #121012;
+  --foreground: #ede8eb;
+
+  /* Shadow system — more visible on dark */
+  --shadow-card: 0 2px 12px rgba(0,0,0,0.35), 0 8px 32px rgba(0,0,0,0.25);
+  --shadow-card-hover: 0 4px 20px rgba(0,0,0,0.45), 0 12px 48px rgba(0,0,0,0.35);
+  --shadow-modal: 0 24px 64px rgba(0,0,0,0.55);
+
+  /* Surface tokens */
+  --surface-base: #201b1e;
+  --surface-raised: #271f23;
+  --surface-overlay: #2d2629;
+  --surface-subtle: rgba(255,255,255,0.03);
+  --surface-hover: rgba(255,255,255,0.055);
+  --surface-active: rgba(255,255,255,0.09);
+
+  /* Divider / separator */
+  --divider: rgba(255,255,255,0.07);
+
+  /* Text tokens */
+  --text-primary: rgba(237,232,235,0.92);
+  --text-secondary: rgba(237,232,235,0.55);
+  --text-tertiary: rgba(237,232,235,0.38);
+  --text-faint: rgba(237,232,235,0.25);
+  --text-placeholder: rgba(237,232,235,0.28);
 
   color-scheme: dark;
 }
@@ -58,94 +104,297 @@ body {
     Arial, "Apple Color Emoji", "Segoe UI Emoji";
 }
 
-/* bg-white utility cards/surfaces (catches all variants: bg-white, bg-white/95, etc.) */
-html.dark [class*="bg-white"] {
-  background-color: #1e1820 !important;
+/* ══════════════════════════════════════════════════════
+   DARK MODE OVERRIDES
+   All surfaces, cards, inputs, borders & text
+   ══════════════════════════════════════════════════════ */
+
+/* ── Backgrounds: solid white surfaces ── */
+html.dark .bg-white {
+  background-color: #201b1e !important;
 }
 
-/* Modals & popover panels — white background with inline style override.
-   Only target elements that use bg-white or have no explicit bg color set.
-   Exclude small chips/badges (rounded-full) and accent-colored elements. */
+/* ── Backgrounds: semi-transparent white — keep transparency but darken base ── */
+/* Tailwind v4 generates bg-white/70 as rgba(var(--color-white)/0.7) so the
+   --color-white: #201b1e override handles these automatically. We just ensure
+   any elements that hardcode bg-white get the full dark surface. */
+html.dark [class*="bg-white"] {
+  background-color: #201b1e !important;
+}
+
+/* ── Semi-transparent variants: preserve the opacity ── */
+html.dark .bg-white\/70,
+html.dark [class="bg-white/70"] { background-color: rgba(32, 27, 30, 0.8) !important; }
+html.dark .bg-white\/80,
+html.dark [class="bg-white/80"] { background-color: rgba(32, 27, 30, 0.88) !important; }
+html.dark .bg-white\/90,
+html.dark [class="bg-white/90"] { background-color: rgba(32, 27, 30, 0.92) !important; }
+html.dark .bg-white\/20 { background-color: rgba(237, 232, 235, 0.12) !important; }
+html.dark .bg-white\/30 { background-color: rgba(237, 232, 235, 0.14) !important; }
+html.dark .bg-white\/50 { background-color: rgba(237, 232, 235, 0.1) !important; }
+
+/* ── backdrop-blur glassmorphism panels ── */
+html.dark .backdrop-blur-sm,
+html.dark .backdrop-blur {
+  /* backdrop-blur panels get a darker glass effect */
+}
+
+/* ── Cards (rounded-2xl, rounded-3xl) — flip background when no explicit color ── */
 html.dark .rounded-3xl:not([class*="bg-"]),
 html.dark .rounded-t-3xl:not([class*="bg-"]) {
-  background-color: #1e1820;
+  background-color: #201b1e;
 }
 
-/* Cards — only flip background when the element uses bg-white explicitly
-   OR has no background class at all. Chips (rounded-full), colored badges,
-   and elements with explicit accent colors are excluded via :not() guards. */
-html.dark .rounded-2xl:not([class*="bg-"]):not([class*="bg-amber"]):not([class*="bg-red"]):not([class*="bg-emerald"]):not([class*="bg-violet"]):not([class*="bg-blue"]):not([class*="bg-yellow"]):not([class*="bg-green"]):not([class*="bg-fuchsia"]):not([class*="bg-orange"]) {
-  background-color: #1e1820;
-}
-/* Explicitly flip only the white-bg cards, not coloured chips */
-html.dark .rounded-2xl.bg-white {
-  background-color: #1e1820 !important;
+html.dark .rounded-2xl:not([class*="bg-"]) {
+  background-color: #201b1e;
 }
 
-/* Cards that use inline style bg */
+/* ── Explicitly white-bg cards/modals ── */
+html.dark .rounded-2xl.bg-white,
+html.dark .rounded-3xl.bg-white {
+  background-color: #201b1e !important;
+}
+
+/* ── Preserve intentional coloured chip/badge backgrounds ── */
+html.dark [class*="bg-pink-"],
+html.dark [class*="bg-rose-"],
+html.dark [class*="bg-amber-"],
+html.dark [class*="bg-yellow-"],
+html.dark [class*="bg-emerald-"],
+html.dark [class*="bg-green-"],
+html.dark [class*="bg-teal-"],
+html.dark [class*="bg-blue-"],
+html.dark [class*="bg-indigo-"],
+html.dark [class*="bg-violet-"],
+html.dark [class*="bg-purple-"],
+html.dark [class*="bg-fuchsia-"],
+html.dark [class*="bg-red-"],
+html.dark [class*="bg-orange-"],
+html.dark [class*="bg-sky-"],
+html.dark [class*="bg-cyan-"] {
+  /* Keep colored chips — handled by their own classes */
+}
+
+/* ── Inline style: white backgrounds ── */
 html.dark [style*="background: white"],
 html.dark [style*="background-color: white"],
-html.dark [style*="background-color: rgb(255, 255, 255)"] {
-  background-color: #1e1820 !important;
+html.dark [style*="background-color: rgb(255, 255, 255)"],
+html.dark [style*="background:#fff"],
+html.dark [style*="background: #fff"] {
+  background-color: #201b1e !important;
 }
 
-/* Inputs and textareas */
+/* ── Gradient cards using from-[color]/[opacity] that look washed in dark ── */
+/* These gradient background cards need a dark base tone instead of near-white */
+html.dark [class*="from-"][class*="to-"][class*="bg-gradient"] {
+  /* gradient tints still show, but bg darkens naturally via --color-white flip */
+}
+
+/* ── Inputs, textareas, selects ── */
 html.dark textarea,
 html.dark input[type="text"],
 html.dark input[type="date"],
 html.dark input[type="time"],
+html.dark input[type="number"],
 html.dark input[type="email"],
+html.dark input[type="search"],
 html.dark select {
-  background-color: #1e1820 !important;
-  color: #f0ecee !important;
-  border-color: rgba(240, 236, 238, 0.15) !important;
+  background-color: #201b1e !important;
+  color: #ede8eb !important;
+  border-color: rgba(237, 232, 235, 0.13) !important;
 }
 
 html.dark textarea::placeholder,
 html.dark input::placeholder {
-  color: rgba(240, 236, 238, 0.3) !important;
+  color: rgba(237, 232, 235, 0.28) !important;
 }
 
-/* Modal scrim — darken it more in dark mode */
+/* ── Borders: subtle black borders → subtle white borders ── */
+/* Most border-black/* utilities auto-flip via --color-black override.
+   Extra specificity for inline-opacity variants: */
+html.dark [class*="border-black"] {
+  border-color: rgba(237, 232, 235, 0.12);
+}
+
+/* ── Modal scrims ── */
 html.dark [class*="bg-black/30"],
-html.dark [class*="bg-black\/30"] {
-  background-color: rgba(0, 0, 0, 0.65) !important;
+html.dark [class*="bg-black\/30"],
+html.dark [class*="bg-black/40"],
+html.dark [class*="bg-black\/40"] {
+  background-color: rgba(0, 0, 0, 0.72) !important;
 }
 
-/* Ensure borders are visible in dark mode */
-html.dark [class*="border-black/"] {
-  --tw-border-opacity: 1;
-}
-
-/* Skeleton loaders */
+/* ── Skeleton / shimmer loaders ── */
 html.dark [class*="bg-black/[0.04]"],
-html.dark [class*="bg-black/[0.06]"] {
+html.dark [class*="bg-black/[0.06]"],
+html.dark [class*="bg-black/[0.08]"] {
   background-color: rgba(255, 255, 255, 0.06) !important;
 }
 
-/* Scrollbar styling */
+/* ── Hover/active surface utilities ── */
+html.dark [class*="hover:bg-black/[0.04]"]:hover,
+html.dark [class*="hover:bg-black\/[0.04]"]:hover {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}
+html.dark [class*="hover:bg-black/[0.05]"]:hover,
+html.dark [class*="hover:bg-black\/[0.05]"]:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* ── Divider gradients (via-black/[0.08]) ── */
+/* These auto-flip via --color-black token, so no override needed */
+
+/* ── Accent color: "Noir" (#1a1a1a) correction ──────────────────────────────
+   When the user picks the Noir accent, --lifeos-pink becomes very dark.
+   In dark mode this makes accent-colored elements invisible.
+   We boost the Noir accent to a visible light grey in dark mode.
+   ─────────────────────────────────────────────────────────────────────────── */
+html.dark {
+  --lifeos-pink-dark-adjusted: var(--lifeos-pink);
+}
+
+/* Detect near-black accent and swap to readable light value.
+   We use a CSS custom property cascade trick: define a fallback. */
+/* NOTE: We can't conditionally check the value of --lifeos-pink in CSS alone,
+   so we handle Noir in JS (see AppShell) and here we ensure the base pink
+   always produces readable contrast in dark mode for any mid/light hue. */
+
+/* ── Ensure "accent-colored" text/bg still readable in dark mode ── */
+/* When the accent is very dark (Noir), JS sets a data attribute we can use */
+html.dark[data-accent-dark] [class*="text-[var(--lifeos-pink)]"],
+html.dark[data-accent-dark] [class*="text-[var(--lifeos-pink-2)]"] {
+  color: #c8c0c8 !important;
+}
+html.dark[data-accent-dark] [class*="bg-[var(--lifeos-pink)]"] {
+  background-color: #3a3340 !important;
+}
+html.dark[data-accent-dark] [class*="border-[var(--lifeos-pink)]"] {
+  border-color: rgba(200, 192, 200, 0.4) !important;
+}
+html.dark[data-accent-dark] [class*="shadow-["][class*="lifeos-pink"] {
+  box-shadow: 0 2px 10px rgba(255,255,255,0.06) !important;
+}
+
+/* ── Focus ring uses accent — always readable ── */
+:focus-visible {
+  outline: 2px solid var(--lifeos-pink);
+  outline-offset: 2px;
+}
+/* In dark mode with dark accent, switch focus ring to white */
+html.dark[data-accent-dark] :focus-visible {
+  outline-color: #c8c0c8;
+}
+
+/* ── Scrollbar styling ── */
 html.dark ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 html.dark ::-webkit-scrollbar-track { background: transparent; }
-html.dark ::-webkit-scrollbar-thumb { background: rgba(240, 236, 238, 0.15); border-radius: 999px; }
-html.dark ::-webkit-scrollbar-thumb:hover { background: rgba(240, 236, 238, 0.25); }
+html.dark ::-webkit-scrollbar-thumb { background: rgba(237, 232, 235, 0.15); border-radius: 999px; }
+html.dark ::-webkit-scrollbar-thumb:hover { background: rgba(237, 232, 235, 0.28); }
 
-/* Crisp text rendering */
+/* ── Crisp text rendering ── */
 html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* App-wide focus style (keyboard accessible) */
-:focus-visible {
-  outline: 2px solid var(--lifeos-pink);
-  outline-offset: 2px;
-}
-
-/* Prevent mobile overscroll rubber-band from revealing background gaps */
+/* ── Prevent mobile overscroll rubber-band from revealing background gaps ── */
 html,
 body {
   height: 100%;
 }
+
+/* ══════════════════════════════════════════════════════
+   COLOUR-SPECIFIC DARK MODE CHIP/BADGE TINTS
+   Replace washed-out -50 pastel backgrounds with deep,
+   dark-appropriate tints. Text inside these chips uses
+   colored text classes that auto-brighten in dark mode
+   via --color-black flip.
+   ══════════════════════════════════════════════════════ */
+
+html.dark [class*="bg-green-50"] { background-color: rgba(91, 168, 94, 0.12) !important; }
+html.dark [class*="bg-blue-50"]  { background-color: rgba(108, 142, 232, 0.12) !important; }
+html.dark [class*="bg-pink-50"]  { background-color: rgba(217, 108, 125, 0.12) !important; }
+html.dark [class*="bg-rose-50"]  { background-color: rgba(251, 113, 133, 0.12) !important; }
+html.dark [class*="bg-amber-50"] { background-color: rgba(232, 168, 60, 0.12) !important; }
+html.dark [class*="bg-yellow-50"]{ background-color: rgba(234, 179, 8, 0.12) !important; }
+html.dark [class*="bg-violet-50"]{ background-color: rgba(155, 108, 232, 0.12) !important; }
+html.dark [class*="bg-purple-50"]{ background-color: rgba(168, 85, 247, 0.12) !important; }
+html.dark [class*="bg-indigo-50"]{ background-color: rgba(99, 102, 241, 0.12) !important; }
+html.dark [class*="bg-red-50"]   { background-color: rgba(232, 68, 68, 0.12) !important; }
+html.dark [class*="bg-orange-50"]{ background-color: rgba(232, 112, 80, 0.12) !important; }
+html.dark [class*="bg-emerald-50"]{ background-color: rgba(52, 211, 153, 0.10) !important; }
+html.dark [class*="bg-teal-50"]  { background-color: rgba(20, 184, 166, 0.10) !important; }
+html.dark [class*="bg-sky-50"]   { background-color: rgba(14, 165, 233, 0.10) !important; }
+html.dark [class*="bg-cyan-50"]  { background-color: rgba(6, 182, 212, 0.10) !important; }
+html.dark [class*="bg-fuchsia-50"]{ background-color: rgba(232, 121, 249, 0.10) !important; }
+
+/* Coloured text inside chips — boost brightness so they're legible on dark bg */
+/* Only target dark shade variants (600, 700, 800) which are hard to read on dark */
+html.dark [class*="text-green-6"],
+html.dark [class*="text-green-7"],
+html.dark [class*="text-green-8"]  { filter: brightness(1.55); }
+html.dark [class*="text-blue-6"],
+html.dark [class*="text-blue-7"],
+html.dark [class*="text-blue-8"]   { filter: brightness(1.55); }
+html.dark [class*="text-pink-6"],
+html.dark [class*="text-pink-7"],
+html.dark [class*="text-pink-8"]   { filter: brightness(1.55); }
+html.dark [class*="text-rose-6"],
+html.dark [class*="text-rose-7"],
+html.dark [class*="text-rose-8"]   { filter: brightness(1.55); }
+html.dark [class*="text-amber-6"],
+html.dark [class*="text-amber-7"],
+html.dark [class*="text-amber-8"]  { filter: brightness(1.45); }
+html.dark [class*="text-yellow-6"],
+html.dark [class*="text-yellow-7"],
+html.dark [class*="text-yellow-8"] { filter: brightness(1.45); }
+html.dark [class*="text-violet-6"],
+html.dark [class*="text-violet-7"],
+html.dark [class*="text-violet-8"] { filter: brightness(1.6); }
+html.dark [class*="text-purple-6"],
+html.dark [class*="text-purple-7"],
+html.dark [class*="text-purple-8"] { filter: brightness(1.6); }
+html.dark [class*="text-indigo-6"],
+html.dark [class*="text-indigo-7"],
+html.dark [class*="text-indigo-8"] { filter: brightness(1.6); }
+html.dark [class*="text-red-6"],
+html.dark [class*="text-red-7"],
+html.dark [class*="text-red-8"]    { filter: brightness(1.55); }
+html.dark [class*="text-orange-6"],
+html.dark [class*="text-orange-7"],
+html.dark [class*="text-orange-8"] { filter: brightness(1.55); }
+html.dark [class*="text-emerald-6"],
+html.dark [class*="text-emerald-7"]{ filter: brightness(1.45); }
+html.dark [class*="text-teal-6"],
+html.dark [class*="text-teal-7"]   { filter: brightness(1.45); }
+html.dark [class*="text-sky-6"],
+html.dark [class*="text-sky-7"]    { filter: brightness(1.45); }
+html.dark [class*="text-fuchsia-6"],
+html.dark [class*="text-fuchsia-7"]{ filter: brightness(1.55); }
+
+/* Very-light coloured borders (100, 200) — keep them visible but subtle */
+html.dark [class*="border-green-1"],
+html.dark [class*="border-green-2"]  { border-color: rgba(91, 168, 94, 0.22) !important; }
+html.dark [class*="border-blue-1"],
+html.dark [class*="border-blue-2"]   { border-color: rgba(108, 142, 232, 0.22) !important; }
+html.dark [class*="border-pink-1"],
+html.dark [class*="border-pink-2"]   { border-color: rgba(217, 108, 125, 0.22) !important; }
+html.dark [class*="border-rose-1"],
+html.dark [class*="border-rose-2"]   { border-color: rgba(251, 113, 133, 0.22) !important; }
+html.dark [class*="border-amber-1"],
+html.dark [class*="border-amber-2"]  { border-color: rgba(232, 168, 60, 0.22) !important; }
+html.dark [class*="border-violet-1"],
+html.dark [class*="border-violet-2"] { border-color: rgba(155, 108, 232, 0.22) !important; }
+html.dark [class*="border-purple-1"],
+html.dark [class*="border-purple-2"] { border-color: rgba(168, 85, 247, 0.22) !important; }
+html.dark [class*="border-red-1"],
+html.dark [class*="border-red-2"]    { border-color: rgba(232, 68, 68, 0.22) !important; }
+html.dark [class*="border-orange-1"],
+html.dark [class*="border-orange-2"] { border-color: rgba(232, 112, 80, 0.22) !important; }
+html.dark [class*="border-emerald-1"],
+html.dark [class*="border-emerald-2"]{ border-color: rgba(52, 211, 153, 0.20) !important; }
+html.dark [class*="border-indigo-1"],
+html.dark [class*="border-indigo-2"] { border-color: rgba(99, 102, 241, 0.22) !important; }

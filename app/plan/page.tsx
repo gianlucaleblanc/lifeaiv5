@@ -253,7 +253,7 @@ export default function PlanPage() {
 
     // Load done state for today's blocks using a simple localStorage key
     try {
-      const raw = window.localStorage.getItem("lifeos_done_today_v1");
+      const raw = window.localStorage.getItem("openhour_done_today_v1");
       const parsed = raw ? JSON.parse(raw) : {};
       // Only keep entries from today (stale data cleared automatically)
       const todayKey = getTodayIso();
@@ -268,7 +268,7 @@ export default function PlanPage() {
     if (!loaded) return;
     try {
       window.localStorage.setItem(
-        "lifeos_done_today_v1",
+        "openhour_done_today_v1",
         JSON.stringify({ date: todayIso, done: doneBlocks })
       );
     } catch { /* ignore */ }
@@ -304,10 +304,8 @@ export default function PlanPage() {
     return calendar
       .filter((b) => {
         if (b.date < todayIso || b.date > cutoffIso) return false;
-        // Keep syllabus events and anything that looks like a deadline/exam
-        const isSyllabus = b.meta?.kind === "syllabus";
-        const isDeadline = /exam|quiz|midterm|final|due|deadline|assignment|paper|project/i.test(b.title);
-        return isSyllabus || isDeadline;
+        // Only show items imported via the syllabus builder (kind === "syllabus")
+        return b.meta?.kind === "syllabus";
       })
       .sort((a, b) => a.date === b.date ? a.startMin - b.startMin : a.date.localeCompare(b.date));
   }, [calendar, todayIso]);
