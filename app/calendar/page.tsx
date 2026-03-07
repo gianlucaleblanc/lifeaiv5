@@ -323,18 +323,15 @@ export default function CalendarPage() {
   const weekStart = useMemo(() => startOfWeek(cursor), [cursor]);
   const visibleDays = isMobile ? 3 : 7;
   const days = useMemo(() => Array.from({ length: visibleDays }, (_, i) => {
-    const d = new Date(weekStart);
-    // On mobile (3-day view), center on today: find today's offset in the week
+    const d = new Date(isMobile ? cursor : weekStart);
     if (isMobile) {
-      const todayDate = new Date();
-      const todayOffset = (todayDate.getDay() + 6) % 7; // 0=Mon..6=Sun
-      const start = Math.max(0, Math.min(4, todayOffset - 1)); // show today ± 1 day, clamped
-      d.setDate(d.getDate() + start + i);
+      // On mobile, show cursor day in the center (cursor - 1, cursor, cursor + 1)
+      d.setDate(d.getDate() - 1 + i);
     } else {
       d.setDate(d.getDate() + i);
     }
     return d;
-  }), [weekStart, visibleDays, isMobile]);
+  }), [weekStart, cursor, visibleDays, isMobile]);
 
   const inWeek = useMemo(() => new Set(days.map((d) => isoDateLocal(d))), [days]);
   const weekBlocks = useMemo(() => items.filter((b) => inWeek.has(b.date)), [items, inWeek]);
@@ -617,9 +614,9 @@ export default function CalendarPage() {
               </div>
               {viewMode === "week" && (
                 <>
-                  <button onClick={() => { const d = new Date(cursor); d.setDate(d.getDate() - 7); setCursor(d); }}
+                  <button onClick={() => { const d = new Date(cursor); d.setDate(d.getDate() - (isMobile ? 1 : 7)); setCursor(d); }}
                     className="h-9 w-9 flex items-center justify-center rounded-xl border border-black/[0.08] bg-white text-black/60 hover:bg-black/[0.04] hover:scale-105 active:scale-95 transition-all font-bold">←</button>
-                  <button onClick={() => { const d = new Date(cursor); d.setDate(d.getDate() + 7); setCursor(d); }}
+                  <button onClick={() => { const d = new Date(cursor); d.setDate(d.getDate() + (isMobile ? 1 : 7)); setCursor(d); }}
                     className="h-9 w-9 flex items-center justify-center rounded-xl border border-black/[0.08] bg-white text-black/60 hover:bg-black/[0.04] hover:scale-105 active:scale-95 transition-all font-bold">→</button>
                 </>
               )}
