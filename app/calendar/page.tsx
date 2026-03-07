@@ -249,6 +249,50 @@ function dotColor(kind?: string) {
                                 "bg-[var(--lifeos-pink)]";
 }
 
+// ── Mobile jump controls: ← [Day|Week|Month] → ──────────────────────────────
+function MobileJumpControls({ cursor, setCursor }: { cursor: Date; setCursor: (d: Date) => void }) {
+  const [jump, setJump] = useState<"day" | "week" | "month">("day");
+
+  function move(dir: -1 | 1) {
+    const d = new Date(cursor);
+    if (jump === "day") d.setDate(d.getDate() + dir);
+    else if (jump === "week") d.setDate(d.getDate() + dir * 7);
+    else d.setMonth(d.getMonth() + dir);
+    setCursor(d);
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => move(-1)}
+        className="h-9 w-9 flex items-center justify-center rounded-xl border border-black/[0.08] bg-white text-black/60 active:scale-95 transition-all font-bold"
+      >←</button>
+
+      {/* Jump size pill */}
+      <div className="flex rounded-xl border border-black/[0.08] overflow-hidden text-[11px] font-bold">
+        {(["day", "week", "month"] as const).map((s) => (
+          <button
+            key={s}
+            onClick={() => setJump(s)}
+            className={`px-2.5 py-2 capitalize transition-colors ${
+              jump === s
+                ? "bg-[var(--lifeos-pink)] text-white"
+                : "bg-white text-black/40 hover:bg-black/[0.04]"
+            }`}
+          >
+            {s.charAt(0).toUpperCase() + s.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      <button
+        onClick={() => move(1)}
+        className="h-9 w-9 flex items-center justify-center rounded-xl border border-black/[0.08] bg-white text-black/60 active:scale-95 transition-all font-bold"
+      >→</button>
+    </div>
+  );
+}
+
 export default function CalendarPage() {
   const { toast } = useToast();
 
@@ -614,10 +658,19 @@ export default function CalendarPage() {
               </div>
               {viewMode === "week" && (
                 <>
-                  <button onClick={() => { const d = new Date(cursor); d.setDate(d.getDate() - (isMobile ? 1 : 7)); setCursor(d); }}
-                    className="h-9 w-9 flex items-center justify-center rounded-xl border border-black/[0.08] bg-white text-black/60 hover:bg-black/[0.04] hover:scale-105 active:scale-95 transition-all font-bold">←</button>
-                  <button onClick={() => { const d = new Date(cursor); d.setDate(d.getDate() + (isMobile ? 1 : 7)); setCursor(d); }}
-                    className="h-9 w-9 flex items-center justify-center rounded-xl border border-black/[0.08] bg-white text-black/60 hover:bg-black/[0.04] hover:scale-105 active:scale-95 transition-all font-bold">→</button>
+                  {/* Mobile: jump-size pill (Day / Week / Month) + arrows */}
+                  {isMobile && (
+                    <MobileJumpControls cursor={cursor} setCursor={setCursor} />
+                  )}
+                  {/* Desktop: always jump by week */}
+                  {!isMobile && (
+                    <>
+                      <button onClick={() => { const d = new Date(cursor); d.setDate(d.getDate() - 7); setCursor(d); }}
+                        className="h-9 w-9 flex items-center justify-center rounded-xl border border-black/[0.08] bg-white text-black/60 hover:bg-black/[0.04] hover:scale-105 active:scale-95 transition-all font-bold">←</button>
+                      <button onClick={() => { const d = new Date(cursor); d.setDate(d.getDate() + 7); setCursor(d); }}
+                        className="h-9 w-9 flex items-center justify-center rounded-xl border border-black/[0.08] bg-white text-black/60 hover:bg-black/[0.04] hover:scale-105 active:scale-95 transition-all font-bold">→</button>
+                    </>
+                  )}
                 </>
               )}
               {/* Add event button */}
