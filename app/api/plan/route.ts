@@ -548,11 +548,13 @@ LANGUAGE & INPUT UNIVERSALITY:
 3. Return the "coach", "habit", and "personalInsight" fields in the SAME language as the user's input. Keep JSON keys in English always.
 4. Mixed languages in one sentence are valid — parse intent across all languages present (e.g. "meeting mañana at 3pm w/ el equipo" → meeting tomorrow at 3 PM)
 5. Parse emojis as event hints: 💪🏋️=gym/workout, ☕🧋=coffee/café (~30 min), 🍕🍔🍜=meal/dinner (~60 min), 📚✏️=study session, 🏃🚴🧘=exercise/run/yoga, 💊🏥=medical appointment, ✈️🚂=travel, 🎮=gaming, 🎵🎸=music practice. Emojis can replace or supplement words.
-6. Handle voice-to-text artifacts: filler words ("um", "uh", "like", "you know") → ignore; "half past three" → 3:30; "quarter to five" → 4:45; "noon" → 12:00 PM; "midnight" → 00:00; spoken numbers ("eight PM", "eight o'clock") → parse correctly
-7. ALL CAPS words = emphasis only, not a different meaning
-8. Repeated characters for emphasis: "sooooon" = "soon", "lateee" = "late" — treat as the base word
-9. Domain shorthand: "standup"/"sync"/"1:1"/"retro" → work meetings; "WOD"/"HIIT"/"leg day" → workouts; "pset"/"prelim"/"recitation" → academic; "brunch" → 10–11 AM, "supper" → 6–7 PM
-10. Regional time conventions: 24h format (e.g. "15:00" → 3 PM), "Uhr" suffix in German (e.g. "15 Uhr" → 3 PM), "h" suffix in French/Spanish (e.g. "15h" → 3 PM)
+6. Handle voice-to-text artifacts: filler words ("um", "uh", "like", "you know") → ignore; "half past three" → 3:30; "quarter to five" → 4:45; "noon" → 12:00 PM; spoken numbers ("eight PM", "eight o'clock") → parse correctly
+7. DEADLINE RULE: "due at midnight" / "due tonight" / "due by midnight" means the work must be DONE by midnight — schedule the actual WORK BLOCK in the afternoon or evening (e.g., 2:00 PM–6:00 PM or 7:00 PM–9:00 PM). NEVER schedule a task at 12:00 AM or 00:00. The deadline is the cutoff, not the start time.
+8. MEAL RULE: Always schedule lunch around 12:00–1:00 PM and dinner around 6:00–7:00 PM regardless of other tasks. A midnight deadline does NOT shift meal times.
+9. ALL CAPS words = emphasis only, not a different meaning
+10. Repeated characters for emphasis: "sooooon" = "soon", "lateee" = "late" — treat as the base word
+11. Domain shorthand: "standup"/"sync"/"1:1"/"retro" → work meetings; "WOD"/"HIIT"/"leg day" → workouts; "pset"/"prelim"/"recitation" → academic; "brunch" → 10–11 AM, "supper" → 6–7 PM
+12. Regional time conventions: 24h format (e.g. "15:00" → 3 PM), "Uhr" suffix in German (e.g. "15 Uhr" → 3 PM), "h" suffix in French/Spanish (e.g. "15h" → 3 PM)
 
 NATURAL LANGUAGE EXAMPLES you must handle perfectly:
 - "tmrw gym at 7" → gym tomorrow at 7 AM
@@ -570,6 +572,8 @@ NATURAL LANGUAGE EXAMPLES you must handle perfectly:
 - "dem soir repas en famille" → family dinner tonight (French)
 - "mañana gym a las 8" → gym tomorrow at 8 AM (Spanish)
 - "morgen Zahnarzt 15 Uhr" → dentist appointment tomorrow at 3 PM (German)
+- "assignment due at midnight, lunch and dinner" → work block 2:00 PM–5:00 PM, lunch 12:00 PM, dinner 6:00 PM (midnight = deadline, NOT start time; meals at normal hours)
+- "essay due tonight at midnight" → Essay work block 3:00 PM–8:00 PM (schedule work time before the deadline, never at midnight)
 
 UNDERSTANDING INTENT RULES:
 1) If you see "gonna", "wanna", "gotta", "tryna" — treat as "going to", "want to", "need to", "trying to"
@@ -590,6 +594,8 @@ UNDERSTANDING INTENT RULES:
 16) "2day", "2nite" → today, tonight; "rn" → right now; "asap" → schedule at earliest reasonable slot
 17) "lmk", "ngl", "tbh", "fr", "imo" → filler/social phrases, ignore for scheduling purposes
 18) Equivalent words across languages: "demain"/"mañana"/"morgen"/"明日"/"demain" all mean "tomorrow"; "soir"/"noche"/"Abend" all mean "evening"
+19) "due at midnight" / "due by midnight" / "midnight deadline" — the DEADLINE is midnight, NOT the start time. Schedule work hours earlier that day (afternoon/evening). NEVER put a task at 12:00 AM.
+20) "lunch" without a time → schedule at 12:00 PM; "dinner" without a time → schedule at 6:00 PM. These are NEVER affected by when other tasks are due.
 
 DATE CONTEXT (CRITICAL):
 - The user's timezone is ${USER_TIMEZONE}.

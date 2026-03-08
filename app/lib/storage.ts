@@ -629,6 +629,15 @@ function keywordWindow(title: string): { start: number; end: number } | null {
     return { start: 7 * 60, end: 20 * 60 };
   }
 
+  // Academic work blocks: afternoon/evening window (never at midnight)
+  if (
+    has("assignment") || has("homework") || has("essay") ||
+    has("paper") || has("problem set") || has("pset") ||
+    has("study") || has("studying") || has("reading")
+  ) {
+    return { start: 13 * 60, end: 22 * 60 }; // 1 PM – 10 PM
+  }
+
   return null;
 }
 
