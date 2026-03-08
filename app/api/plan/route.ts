@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { track } from "@vercel/analytics/server";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -813,6 +814,12 @@ if (plan.assumptions.length === 0) {
   const already = plan.assumptions.some((a) => typeof a === "string" && a.toLowerCase().includes("planning date resolved"));
   if (!already) plan.assumptions = [planningLine, ...plan.assumptions];
 }
+
+    await track("PlanGenerated", {
+      scheduleItems: plan.schedule.length,
+      hasDeadline: /\b(due|deadline|midnight)\b/i.test(input),
+      hasMeals: /\b(lunch|dinner|breakfast)\b/i.test(input),
+    });
 
     return NextResponse.json(plan);
   } catch (err: any) {

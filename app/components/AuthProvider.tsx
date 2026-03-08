@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { User } from "@supabase/supabase-js";
+import { track } from "@vercel/analytics";
 import { createSupabaseBrowserClient } from "../lib/supabase";
 import { mergeAndSync } from "../lib/cloud-sync";
 import { setCurrentUserId } from "../lib/storage-sync";
@@ -93,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInWithGoogle = useCallback(async () => {
+    track("Signup", { method: "google" });
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
