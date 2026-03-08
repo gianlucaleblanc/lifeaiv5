@@ -3,6 +3,7 @@ import "./globals.css";
 import AppShell from "./components/AppShell";
 import OnboardingWrapper from "./components/OnboardingWrapper";
 import { ToastProvider } from "./components/Toast";
+import { Analytics } from "@vercel/analytics/next";
 
 export const metadata: Metadata = {
   title: "OpenHour",
@@ -42,6 +43,7 @@ export default function RootLayout({
             <AppShell>{children}</AppShell>
           </OnboardingWrapper>
         </ToastProvider>
+        <Analytics />
       </body>
     </html>
   );
