@@ -1,6 +1,21 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
-import { track } from "@vercel/analytics/server";
+
+const POSTHOG_KEY = "phc_5rgri5Bb6XL3CW4b8w82qMPWjCtwTIzGQ7eH54cMGve";
+async function captureServerEvent(event: string, properties: Record<string, any>) {
+  try {
+    await fetch("https://us.i.posthog.com/capture/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: POSTHOG_KEY,
+        event,
+        distinct_id: "server",
+        properties,
+      }),
+    });
+  } catch { /* non-blocking */ }
+}
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -815,7 +830,7 @@ if (plan.assumptions.length === 0) {
   if (!already) plan.assumptions = [planningLine, ...plan.assumptions];
 }
 
-    await track("PlanGenerated", {
+    void captureServerEvent("PlanGenerated", {
       scheduleItems: plan.schedule.length,
       hasDeadline: /\b(due|deadline|midnight)\b/i.test(input),
       hasMeals: /\b(lunch|dinner|breakfast)\b/i.test(input),

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { track } from "@vercel/analytics";
+import posthog from "posthog-js";
 import { useToast } from "./components/Toast";
 import {
   addSyllabusEventsToCalendar,
@@ -3898,7 +3898,7 @@ export default function GeneratePage() {
     showGeneratingOverlay();
     setLoading(true);
     setError(null);
-    track("Generate", { inputLength: input.length });
+    posthog.capture("Generate", { inputLength: input.length });
 
     // Normalize casual/abbreviated input BEFORE any parsing or API call.
     // This converts "tmrw", "gonna", "p.m.", "w/" etc. into clean equivalents.
@@ -4235,7 +4235,7 @@ export default function GeneratePage() {
 
     addToHistory(pendingHistory, 30);
     applyApprovedPlanBlocks(planPreview, approved);
-    track("AddToCalendar", { blocksAdded: approved.length });
+    posthog.capture("AddToCalendar", { blocksAdded: approved.length });
 
     toast(`✓ ${approved.length} block${approved.length !== 1 ? "s" : ""} added to your calendar`, "success");
 
