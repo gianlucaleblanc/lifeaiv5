@@ -1339,24 +1339,39 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
   }
 
   // If the user is planning around explicit weekdays (e.g., "Friday") we treat a newly
-  // generated plan as authoritative for those involved dates. This prevents the UX where
-  // older, incorrectly-placed plan blocks remain on the calendar and make it look like
-  // the AI is "still wrong" after a fix.
+  // generated plan as authoritative for those involved dates — clear all stale plan blocks
+  // so the calendar doesn't accumulate duplicates across re-prompts for the same weekday.
+  //
+  // For today-relative prompts (no weekday), we do NOT clear all plan blocks because users
+  // can legitimately run multiple prompts per day ("I have a workout in the morning" then
+  // "I have an assignment and lunch and dinner"). Instead, we remove plan blocks title-by-title:
+  // if we're about to place "Lunch", we first remove any existing "Lunch" plan block on that day
+  // so the old wrong-time version doesn't persist. This is done at placement time (see addBlock below).
   const affectedDates = new Set<string>([baseDate]);
   for (const a of anchored) affectedDates.add(a.date);
   for (const c of anchoredContext) affectedDates.add(c.date);
   for (const r of relativeAnchored) affectedDates.add(r.date);
-  // Always remove stale "plan" blocks on every affected date before placing new ones.
-  // Previously this only happened for weekday-anchored inputs, causing old bad blocks
-  // (e.g. lunch at 1:30 AM) to persist on the calendar when re-prompting for today.
-  const base = allRaw.filter((b) => !(affectedDates.has(b.date) && b.meta?.kind === "plan"));
+  const base = hasWeekdayInInput
+    ? allRaw.filter((b) => !(affectedDates.has(b.date) && b.meta?.kind === "plan"))
+    : allRaw;
 
   // We'll gather new blocks across potentially multiple dates.
   const newBlocks: CalendarBlock[] = [];
+  // Track which (date, normalizedTitle) pairs we've decided to place, so we can evict
+  // stale same-titled plan blocks from `base` at merge time.
+  const evictTitlesByDate = new Map<string, Set<string>>();
+  const markEvict = (date: string, normTitle: string) => {
+    if (!evictTitlesByDate.has(date)) evictTitlesByDate.set(date, new Set());
+    evictTitlesByDate.get(date)!.add(normTitle);
+  };
 
   const addBlock = (date: string, title: string, startMin: number, endMin: number, metaKind: string) => {
     const normalized = normalizeEventTitle(title).slice(0, 80) || "Event";
     const finalTitle = enrichGenericTitle(normalized, history.input ?? "");
+    // Mark this (date, title) so any old same-titled plan block gets evicted at merge time.
+    // This ensures re-prompting "lunch and dinner" replaces stale wrong-time versions
+    // without wiping unrelated plan blocks from other prompts on the same day.
+    markEvict(date, finalTitle.toLowerCase());
     newBlocks.push({
       id: generateId(),
       date,
@@ -1368,8 +1383,9 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
     });
   };
 
-  // We merge per-date, preserving existing blocks.
-  const existingFor = (date: string) => base.filter((b) => b.date === date);
+  // We merge per-date. For overlap/slot-finding purposes we use allRaw (all existing blocks)
+  // so we don't accidentally double-book a slot. De-dupe title checks are done separately below.
+  const existingFor = (date: string) => allRaw.filter((b) => b.date === date);
 
   const isTodayBase = isoDateLocal(now) === baseDate;
   const nowMinBase = isTodayBase ? now.getHours() * 60 + now.getMinutes() : 6 * 60;
@@ -1399,6 +1415,34 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
     /\b\d{1,2}\s*(?:am|pm)\b/i.test(String(history.input || ""));
 
   const allowScheduleDerivedTitles = broadPlanRequest || !hasExplicitAnchor;
+
+  // ── GUARANTEED KEYWORD BLOCKS ──────────────────────────────────────────────────────────────
+  // Even if the AI doesn't include certain items in its schedule, we guarantee placement
+  // for well-known high-confidence keywords directly extracted from the user's input.
+  // This prevents "lunch and dinner" from disappearing when the AI returns an empty/minimal schedule.
+  const inputLowerKw = (history.input ?? "").toLowerCase();
+  const guaranteedTitles: Array<{ title: string; window: { start: number; end: number } }> = [];
+
+  if (/\blunch\b/.test(inputLowerKw)) guaranteedTitles.push({ title: "Lunch", window: { start: 11 * 60 + 30, end: 14 * 60 } });
+  if (/\bdinner\b|\bsupper\b/.test(inputLowerKw)) guaranteedTitles.push({ title: "Dinner", window: { start: 17 * 60 + 30, end: 20 * 60 + 30 } });
+  if (/\bbreakfast\b/.test(inputLowerKw)) guaranteedTitles.push({ title: "Breakfast", window: { start: 6 * 60, end: 10 * 60 } });
+
+  // For academic work blocks: if "assignment"/"essay"/"homework" + "midnight"/"due" is mentioned,
+  // guarantee an afternoon work block if the AI doesn't produce one.
+  const hasDeadlineInput = /\b(assignment|essay|homework|paper|project|pset|problem set)\b/.test(inputLowerKw) &&
+    /\b(midnight|due|deadline)\b/.test(inputLowerKw);
+  if (hasDeadlineInput) {
+    const workTitle = inputLowerKw.includes("essay") ? "Essay work"
+      : inputLowerKw.includes("paper") ? "Paper work"
+      : inputLowerKw.includes("pset") || inputLowerKw.includes("problem set") ? "Problem set"
+      : inputLowerKw.includes("homework") ? "Homework"
+      : "Assignment work";
+    guaranteedTitles.push({ title: workTitle, window: { start: 13 * 60, end: 22 * 60 } }); // 1 PM–10 PM
+  }
+
+  // Add any workout/run keywords directly from input
+  if (/\b(run|running|5k|10k)\b/.test(inputLowerKw)) guaranteedTitles.push({ title: "Run", window: { start: 7 * 60, end: 20 * 60 } });
+  if (/\b(gym|workout|lift|lifting)\b/.test(inputLowerKw)) guaranteedTitles.push({ title: "Workout", window: { start: 7 * 60, end: 20 * 60 } });
 
   // 1) Schedule weekday-anchored items first, so they never incorrectly land on baseDate.
   for (const a of anchored) {
@@ -1560,6 +1604,35 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
     }
   }
 
+  // ── GUARANTEED KEYWORD BLOCKS (pass 0) ───────────────────────────────────────────────────
+  // Place high-confidence keyword items extracted directly from the user's input.
+  // These run unconditionally (regardless of allowScheduleDerivedTitles) and are placed BEFORE
+  // the AI schedule items, so they always land in the correct time window.
+  // They are skipped if the item is already on the calendar at a reasonable time (non-midnight).
+  for (const g of guaranteedTitles) {
+    const norm = g.title.toLowerCase();
+    // Skip if already placed by a higher-priority path (time-tagged, weekday-anchored, etc.)
+    if (timeTaggedNorms.has(norm)) continue;
+    if (anchoredKeys.has(`${baseDate}::${norm}::`)) continue;
+    if (newBlocks.some((b) => b.date === baseDate && b.title.toLowerCase() === norm)) continue;
+
+    const existingForDay = existingFor(baseDate);
+    // Skip if a non-plan block already exists with this title
+    if (existingForDay.some((b) => b.title.toLowerCase() === norm && b.meta?.kind !== "plan")) continue;
+    // Skip if a plan block already exists at a sensible time (not midnight)
+    const existingPlan = existingForDay.find((b) => b.title.toLowerCase() === norm && b.meta?.kind === "plan");
+    if (existingPlan && existingPlan.startMin >= 60 && existingPlan.startMin < 23 * 60 + 30) continue;
+
+    // Exclude stale midnight-placed plan blocks from slot-finding
+    const slotsInUse = [
+      ...existingForDay.filter((b) => !(b.meta?.kind === "plan" && b.title.toLowerCase() === norm)),
+      ...newBlocks.filter((b) => b.date === baseDate),
+    ];
+    const slot = findNextSlot(slotsInUse, durationMin, g.window, stepMin);
+    if (!slot) continue;
+    addBlock(baseDate, g.title, slot.startMin, slot.endMin, "plan");
+  }
+
   if (allowScheduleDerivedTitles) for (const rawTitle of titles) {
     const title = normalizeEventTitle(rawTitle);
     if (!title) continue;
@@ -1569,9 +1642,12 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
     // do NOT also add a second, model-suggested version of the same thing.
     if (timeTaggedNorms.has(norm)) continue;
 
-    // De-dupe: skip if same title already exists on that day.
+    // De-dupe: skip if same title already exists as a non-plan block (manual/syllabus).
+    // We DO NOT skip for existing "plan" blocks — we'll evict the stale one and place
+    // the new one at the correct time (addBlock marks it for eviction via markEvict).
     const existingForDay = existingFor(baseDate);
-    if (existingForDay.some((b) => b.title.toLowerCase() === norm)) continue;
+    if (existingForDay.some((b) => b.title.toLowerCase() === norm && b.meta?.kind !== "plan")) continue;
+    // Skip if already placed by the guaranteed-keywords pass
     if (newBlocks.some((b) => b.date === baseDate && b.title.toLowerCase() === norm)) continue;
 
     // If the title itself includes an explicit time (rare but possible), honor it.
@@ -1586,13 +1662,30 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
       ? windowFromKeywords
       : { start: fallbackStart, end: 22 * 60 }; // hard cap at 10 PM for unrecognized items
 
-    const slot = findNextSlot([...existingForDay, ...newBlocks.filter((b) => b.date === baseDate)], durationMin, window, stepMin);
+    // For slot-finding, exclude blocks that we're going to evict (same-title plan blocks)
+    // so their wrong-time slot doesn't block the correct placement.
+    const slotsInUse = [
+      ...existingForDay.filter((b) => !(b.meta?.kind === "plan" && b.title.toLowerCase() === norm)),
+      ...newBlocks.filter((b) => b.date === baseDate),
+    ];
+    const slot = findNextSlot(slotsInUse, durationMin, window, stepMin);
     if (!slot) continue;
 
     addBlock(baseDate, title, slot.startMin, slot.endMin, "plan");
   }
 
-  const merged = [...newBlocks, ...base];
+  // Apply title-based evictions: remove stale plan blocks whose titles we've replaced.
+  // This handles the case where "Lunch" was previously placed at 1:30 AM (wrong) —
+  // we evict it and the new "Lunch" at 12:00 PM takes its place.
+  // Blocks from other prompts with unrelated titles are preserved.
+  const baseAfterEvict = base.filter((b) => {
+    if (b.meta?.kind !== "plan") return true; // never evict manual/syllabus blocks
+    const evictSet = evictTitlesByDate.get(b.date);
+    if (!evictSet) return true;
+    return !evictSet.has(b.title.toLowerCase());
+  });
+
+  const merged = [...newBlocks, ...baseAfterEvict];
   return {
     baseDate,
     hasWeekdayInInput,
