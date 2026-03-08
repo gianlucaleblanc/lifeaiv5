@@ -1533,6 +1533,10 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
     }
   }
 
+  // Fallback window start: clamp nowMinBase to 6 AM–8 PM so prompts submitted late at night
+  // never cascade blocks past midnight. Hard cap the fallback window end at 10 PM.
+  const fallbackStart = Math.min(Math.max(nowMinBase, 6 * 60), 20 * 60); // 6 AM–8 PM
+
   // 2) Explicit times without weekday ("meeting at 7pm") should apply to the base day.
   // BUT: if the user's input mentions ANY weekday, we skip this step entirely.
   // Otherwise, inputs like "flight Friday at 10:30" can incorrectly create a "time-only" block on today.
@@ -1546,8 +1550,12 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
       if (anchoredKeys.has(key)) continue;
 
       const existingForDay = existingFor(baseDate);
-      if (existingForDay.some((b) => b.title.toLowerCase() === norm && b.startMin === t.atMin)) continue;
-      addBlock(baseDate, t.title, t.atMin, Math.min(t.atMin + durationMin, 24 * 60), "plan");
+      // Clamp midnight/near-midnight explicit times using keywordWindow
+      const tAtMinClamped = (t.atMin < 60 || t.atMin >= 23 * 60 + 30)
+        ? (keywordWindow(t.title)?.start ?? fallbackStart)
+        : t.atMin;
+      if (existingForDay.some((b) => b.title.toLowerCase() === norm && b.startMin === tAtMinClamped)) continue;
+      addBlock(baseDate, t.title, tAtMinClamped, Math.min(tAtMinClamped + durationMin, 24 * 60), "plan");
     }
   }
 
@@ -1575,7 +1583,7 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
     const windowFromKeywords = keywordWindow(title);
     const window = windowFromKeywords
       ? windowFromKeywords
-      : { start: Math.max(nowMinBase, 6 * 60), end: 24 * 60 };
+      : { start: fallbackStart, end: 22 * 60 }; // hard cap at 10 PM for unrecognized items
 
     const slot = findNextSlot([...existingForDay, ...newBlocks.filter((b) => b.date === baseDate)], durationMin, window, stepMin);
     if (!slot) continue;
