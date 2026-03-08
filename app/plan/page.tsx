@@ -296,6 +296,7 @@ export default function PlanPage() {
   const todayPct = todayTotal > 0 ? Math.round((todayDone / todayTotal) * 100) : 0;
 
   // All upcoming syllabus/deadline events in the next 45 days, sorted by date
+  const DEADLINE_KEYWORDS = /\b(assignment|homework|essay|paper|project|exam|quiz|midterm|final|pset|problem set|due|deadline|test|lab report|report|presentation)\b/i;
   const upcomingDeadlines = useMemo(() => {
     const cutoff = new Date(todayIso);
     cutoff.setDate(cutoff.getDate() + 45);
@@ -304,8 +305,11 @@ export default function PlanPage() {
     return calendar
       .filter((b) => {
         if (b.date < todayIso || b.date > cutoffIso) return false;
-        // Only show items imported via the syllabus builder (kind === "syllabus")
-        return b.meta?.kind === "syllabus";
+        // Include syllabus-imported items
+        if (b.meta?.kind === "syllabus") return true;
+        // Also include manually-created blocks with assignment/deadline keywords
+        if (b.meta?.kind === "manual" && DEADLINE_KEYWORDS.test(b.title)) return true;
+        return false;
       })
       .sort((a, b) => a.date === b.date ? a.startMin - b.startMin : a.date.localeCompare(b.date));
   }, [calendar, todayIso]);

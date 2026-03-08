@@ -1252,7 +1252,23 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
 
     // Build blocks — end time = next block's start, or start + 60 for last
     for (let i = 0; i < parsed.length; i++) {
-      const { title, startMin } = parsed[i];
+      let { title, startMin } = parsed[i];
+
+      // Guard: never place a block at or near midnight (startMin < 60 means 12:00–1:00 AM,
+      // or startMin >= 1410 means 11:30 PM+). If the AI scheduled something at midnight
+      // because of a "due at midnight" deadline, remap it to a sensible time using keywordWindow,
+      // or skip it entirely if it's genuinely a nighttime item (e.g. "Bedtime").
+      const isMidnightSlot = startMin < 60 || startMin >= 23 * 60 + 30;
+      if (isMidnightSlot) {
+        const kw = keywordWindow(title);
+        if (kw) {
+          startMin = kw.start; // use keyword window start (e.g. lunch → 11:30 AM)
+        } else {
+          // Skip truly unusable midnight slots (nothing meaningful at 12 AM)
+          continue;
+        }
+      }
+
       // End time: next block start, or start + 60 min
       const nextStart = parsed[i + 1]?.startMin;
       const endMin = nextStart !== undefined && nextStart > startMin
@@ -1393,9 +1409,14 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
     const key = `${a.date}::${norm}::${a.atMin ?? ""}`;
     anchoredKeys.add(key);
 
-    if (a.atMin !== undefined) {
-      if (existingForDay.some((b) => b.title.toLowerCase() === norm && b.startMin === a.atMin)) continue;
-      addBlock(a.date, title, a.atMin, Math.min(a.atMin + (a.durationMin ?? durationMin), 24 * 60), "plan");
+    // Remap midnight/near-midnight times to keyword window or skip
+    const atMinClamped = (a.atMin !== undefined && (a.atMin < 60 || a.atMin >= 23 * 60 + 30))
+      ? (keywordWindow(title)?.start ?? undefined)
+      : a.atMin;
+
+    if (atMinClamped !== undefined) {
+      if (existingForDay.some((b) => b.title.toLowerCase() === norm && b.startMin === atMinClamped)) continue;
+      addBlock(a.date, title, atMinClamped, Math.min(atMinClamped + (a.durationMin ?? durationMin), 24 * 60), "plan");
       continue;
     }
 
