@@ -400,47 +400,74 @@ export default function CalendarPage() {
     const colW = (gridW - timeColPx) / visibleDays;
     const dayIdx = clamp(Math.floor(x / colW), 0, visibleDays - 1);
     const date = isoDateLocal(days[dayIdx]);
-    const y = clamp(clientY - r.top, 0, gridHeightPx);
+    // Fix: account for scroll position so Y is correct even when scrolled down
+    const scrollTop = scrollEl.scrollTop;
+    const y = clamp(clientY - r.top + scrollTop, 0, gridHeightPx);
     const mins = startHour * 60 + (y / hourRowPx) * 60;
     const snapped = Math.round(mins / stepMin) * stepMin;
     return { date, startMin: clamp(snapped, startHour * 60, endHour * 60) };
   }
 
+  // Window-level pointer handlers so drag works even when finger drifts outside the grid
+  const windowDragMove = useRef<((e: PointerEvent) => void) | null>(null);
+  const windowDragUp = useRef<((e: PointerEvent) => void) | null>(null);
+
+  function attachWindowDragListeners() {
+    windowDragMove.current = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const slot = pointerToSlot(e.clientX, e.clientY);
+      if (!slot) return;
+      d.moved = true;
+      const startMin = clamp(slot.startMin - d.offsetMin, startHour * 60, endHour * 60 - d.duration);
+      const endMin = startMin + d.duration;
+      const id = d.id;
+      setItems((prev) => prev.map((b) => b.id === id ? { ...b, date: slot.date, startMin, endMin } : b));
+      setDragPreview({ date: slot.date, startMin, endMin });
+    };
+    windowDragUp.current = () => {
+      detachWindowDragListeners();
+      const d = dragRef.current;
+      if (!d) return;
+      const id = d.id;
+      const moved = d.moved;
+      dragRef.current = null;
+      setDragPreview(null);
+      setItems((prev) => {
+        const movedBlock = prev.find((b) => b.id === id);
+        if (!movedBlock) return prev;
+        const updated = updateCalendarBlock(id, { date: movedBlock.date, startMin: movedBlock.startMin, endMin: movedBlock.endMin });
+        if (moved) toast(`Moved to ${formatDayLabel(new Date(`${movedBlock.date}T12:00:00`))} · ${minsTo12h(movedBlock.startMin)}`, "info");
+        return updated;
+      });
+    };
+    window.addEventListener("pointermove", windowDragMove.current);
+    window.addEventListener("pointerup", windowDragUp.current);
+    window.addEventListener("pointercancel", windowDragUp.current);
+  }
+
+  function detachWindowDragListeners() {
+    if (windowDragMove.current) window.removeEventListener("pointermove", windowDragMove.current);
+    if (windowDragUp.current) {
+      window.removeEventListener("pointerup", windowDragUp.current);
+      window.removeEventListener("pointercancel", windowDragUp.current);
+    }
+    windowDragMove.current = null;
+    windowDragUp.current = null;
+  }
+
   function onBlockPointerDown(e: React.PointerEvent, b: CalendarBlock) {
     e.preventDefault();
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    e.stopPropagation();
     dragRef.current = { id: b.id, duration: Math.max(10, b.endMin - b.startMin), offsetMin: 0, moved: false };
     const slot = pointerToSlot(e.clientX, e.clientY);
     if (slot) dragRef.current.offsetMin = clamp(slot.startMin - b.startMin, -12 * 60, 12 * 60);
+    attachWindowDragListeners();
   }
 
-  function onPointerMove(e: React.PointerEvent) {
-    const d = dragRef.current;
-    if (!d) return;
-    const slot = pointerToSlot(e.clientX, e.clientY);
-    if (!slot) return;
-    d.moved = true;
-    const startMin = clamp(slot.startMin - d.offsetMin, startHour * 60, endHour * 60 - d.duration);
-    const endMin = startMin + d.duration;
-    const id = d.id;
-    setItems((prev) => prev.map((b) => b.id === id ? { ...b, date: slot.date, startMin, endMin } : b));
-    // Show drag preview ghost
-    setDragPreview({ date: slot.date, startMin, endMin });
-  }
-
-  function onPointerUp() {
-    const d = dragRef.current;
-    if (!d) return;
-    const id = d.id;
-    const moved = d.moved;
-    dragRef.current = null;
-    setDragPreview(null);
-    const movedBlock = items.find((b) => b.id === id);
-    if (!movedBlock) return;
-    const updated = updateCalendarBlock(id, { date: movedBlock.date, startMin: movedBlock.startMin, endMin: movedBlock.endMin });
-    persist(updated);
-    if (moved) toast(`Moved to ${formatDayLabel(new Date(`${movedBlock.date}T12:00:00`))} · ${minsTo12h(movedBlock.startMin)}`, "info");
-  }
+  // Keep these as no-ops on the grid body — real work is on window listeners now
+  function onPointerMove(_e: React.PointerEvent) {}
+  function onPointerUp() {}
 
   function openDetail(id: string) { setDetailId(id); }
   function openEditor(id: string) { setDetailId(null); setActiveId(id); }
@@ -909,7 +936,7 @@ export default function CalendarPage() {
                                         <div
                                           data-block
                                           className={`w-full h-full cursor-grab select-none overflow-hidden rounded-lg border text-left transition-all hover:shadow-md hover:scale-[1.02] active:cursor-grabbing active:scale-[0.98] ${blockColor} ${isDragging ? "opacity-60 shadow-lg" : ""} ${compact ? "p-0.5" : "p-1"}`}
-                                          style={blockStyle}
+                                          style={{ ...blockStyle, touchAction: "none" }}
                                           title={b.meta?.fullDetail ? `${b.title}\n${b.meta.fullDetail}` : b.title}
                                           onPointerDown={(e) => onBlockPointerDown(e, b)}
                                           onClick={() => !dragRef.current?.moved && openDetail(b.id)}
