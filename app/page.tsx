@@ -3929,7 +3929,10 @@ export default function GeneratePage() {
       }
 
       // Detect explicit planning requests
-      const looksLikePlanningRequest = /\b(plan\s+my\s+(?:day|week)|make\s+(?:me\s+)?a\s+plan|build\s+(?:me\s+)?(?:a\s+)?schedule|create\s+(?:me\s+)?(?:a\s+)?schedule|organize\s+my\s+(?:day|week)|routine|agenda|help\s+me\s+with\s+my\s+day)\b/i.test(ni);
+      const looksLikePlanningRequest = /\b(plan\s+my\s+(?:day|week)|make\s+(?:me\s+)?a\s+plan|build\s+(?:me\s+)?(?:a\s+)?schedule|create\s+(?:me\s+)?(?:a\s+)?schedule|organize\s+my\s+(?:day|week)|routine|agenda|help\s+me\s+with\s+my\s+day)\b/i.test(ni)
+        // Deadline inputs ("due at midnight", "due tonight", "due by X") should go to the AI
+        // planner, not the manual event path — "midnight" is a cutoff, not a start time.
+        || /\b(due\s+(?:at|by|tonight|at\s+midnight)|deadline\s+(?:at|by)|assignment\s+due|essay\s+due|homework\s+due|paper\s+due|project\s+due)\b/i.test(ni);
 
       // ── Recurring event detection ──
       // "gym every Monday and Wednesday", "class on MWF at 10am", "yoga every Tuesday"

@@ -1619,9 +1619,9 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
     const existingForDay = existingFor(baseDate);
     // Skip if a non-plan block already exists with this title
     if (existingForDay.some((b) => b.title.toLowerCase() === norm && b.meta?.kind !== "plan")) continue;
-    // Skip if a plan block already exists at a sensible time (not midnight)
+    // Skip if a plan block already exists at a sensible time (6 AM–10 PM range, not midnight)
     const existingPlan = existingForDay.find((b) => b.title.toLowerCase() === norm && b.meta?.kind === "plan");
-    if (existingPlan && existingPlan.startMin >= 60 && existingPlan.startMin < 23 * 60 + 30) continue;
+    if (existingPlan && existingPlan.startMin >= 6 * 60 && existingPlan.startMin < 22 * 60) continue;
 
     // Exclude stale midnight-placed plan blocks from slot-finding
     const slotsInUse = [
