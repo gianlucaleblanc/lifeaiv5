@@ -1346,9 +1346,10 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
   for (const a of anchored) affectedDates.add(a.date);
   for (const c of anchoredContext) affectedDates.add(c.date);
   for (const r of relativeAnchored) affectedDates.add(r.date);
-  const base = hasWeekdayInInput
-    ? allRaw.filter((b) => !(affectedDates.has(b.date) && b.meta?.kind === "plan"))
-    : allRaw;
+  // Always remove stale "plan" blocks on every affected date before placing new ones.
+  // Previously this only happened for weekday-anchored inputs, causing old bad blocks
+  // (e.g. lunch at 1:30 AM) to persist on the calendar when re-prompting for today.
+  const base = allRaw.filter((b) => !(affectedDates.has(b.date) && b.meta?.kind === "plan"));
 
   // We'll gather new blocks across potentially multiple dates.
   const newBlocks: CalendarBlock[] = [];
