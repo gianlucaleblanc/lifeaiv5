@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { saveOnboardingProfile, type OnboardingProfile } from "../lib/storage";
+import { saveOnboardingProfile, type OnboardingProfile } from "../lib/storage-sync";
 // saveOnboardingProfile also seeds UserPreferences.preferredStartHour / preferredEndHour
 // so the very first AI session is already personalized without any feedback required.
 

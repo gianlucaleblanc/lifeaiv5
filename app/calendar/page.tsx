@@ -11,7 +11,7 @@ import {
   updateCalendarBlock,
   updateCalendarSeries,
   type CalendarBlock,
-} from "../lib/storage";
+} from "../lib/storage-sync";
 import { useToast } from "../components/Toast";
 
 function pad2(n: number) {
@@ -350,6 +350,15 @@ export default function CalendarPage() {
     setItems(loadCalendar());
     setTodayISO(isoDateLocal(new Date()));
     setLoaded(true);
+  }, []);
+
+  // Re-read calendar after cloud merge on sign-in
+  useEffect(() => {
+    function onCloudSync() {
+      setItems(loadCalendar());
+    }
+    window.addEventListener("openhour:cloud-sync", onCloudSync);
+    return () => window.removeEventListener("openhour:cloud-sync", onCloudSync);
   }, []);
 
   useEffect(() => {

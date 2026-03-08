@@ -4,6 +4,7 @@ import AppShell from "./components/AppShell";
 import OnboardingWrapper from "./components/OnboardingWrapper";
 import { ToastProvider } from "./components/Toast";
 import { Analytics } from "@vercel/analytics/next";
+import { AuthProvider } from "./components/AuthProvider";
 
 export const metadata: Metadata = {
   title: "OpenHour",
@@ -38,12 +39,14 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body className="antialiased">
-        <ToastProvider>
-          <OnboardingWrapper>
-            <AppShell>{children}</AppShell>
-          </OnboardingWrapper>
-        </ToastProvider>
-        <Analytics />
+        <AuthProvider>
+          <ToastProvider>
+            <OnboardingWrapper>
+              <AppShell>{children}</AppShell>
+            </OnboardingWrapper>
+          </ToastProvider>
+          <Analytics />
+        </AuthProvider>
       </body>
     </html>
   );

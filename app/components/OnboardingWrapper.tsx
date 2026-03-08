@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { hasCompletedOnboarding } from "../lib/storage";
+import { hasCompletedOnboarding } from "../lib/storage-sync";
 import OnboardingFlow from "./OnboardingFlow";
 
 /**

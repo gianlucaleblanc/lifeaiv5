@@ -30,7 +30,7 @@ import {
   type FeedbackSignal,
   type FeedbackEntry,
   type UserPreferences,
-} from "./lib/storage";
+} from "./lib/storage-sync";
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -3050,6 +3050,16 @@ export default function GeneratePage() {
     niceToHave: "",
     savePrefs: true,
   });
+
+  // Re-read preferences + calendar after cloud merge on sign-in
+  useEffect(() => {
+    function onCloudSync() {
+      setUserPrefs(loadPreferences());
+      setFeedbackSessions(loadPreferences().totalFeedbackSessions);
+    }
+    window.addEventListener("openhour:cloud-sync", onCloudSync);
+    return () => window.removeEventListener("openhour:cloud-sync", onCloudSync);
+  }, []);
 
   // Helper: get preference context string to inject into API calls
   function getPreferenceContext(): string {

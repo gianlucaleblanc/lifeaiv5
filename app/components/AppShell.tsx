@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { useAuth } from "./AuthProvider";
 
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
@@ -65,6 +66,98 @@ function LogoMark() {
         <span className="text-[22px] font-extrabold text-[var(--lifeos-pink)]" style={{ letterSpacing: "-0.04em" }}>Hour</span>
       </div>
     </Link>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Auth button — Google sign-in / avatar when signed in
+// ─────────────────────────────────────────────────────────────
+function AuthButton() {
+  const { user, loading, signInWithGoogle, signOut } = useAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  if (loading) return null; // Avoid flash of wrong auth state
+
+  if (!user) {
+    return (
+      <button
+        onClick={signInWithGoogle}
+        className="flex items-center gap-1.5 h-9 rounded-xl px-3 text-black/50 hover:text-black/80 hover:bg-black/[0.05] transition-all duration-150 text-xs font-semibold"
+        title="Sign in to sync your data across devices"
+      >
+        {/* Google G icon */}
+        <svg viewBox="0 0 24 24" className="h-4 w-4 flex-shrink-0" aria-hidden="true">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        <span className="hidden sm:inline">Sign in</span>
+      </button>
+    );
+  }
+
+  // Signed-in: avatar with dropdown
+  const avatarUrl = user.user_metadata?.avatar_url as string | undefined;
+  const displayName =
+    ((user.user_metadata?.full_name as string | undefined)?.split(" ")[0]) ??
+    "Account";
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setMenuOpen((v) => !v)}
+        className="relative flex items-center h-9 w-9 rounded-xl hover:bg-black/[0.05] transition-all duration-150 justify-center"
+        title={displayName}
+      >
+        {avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={avatarUrl}
+            alt={displayName}
+            className="h-7 w-7 rounded-full object-cover ring-2 ring-[var(--lifeos-pink)]/30"
+          />
+        ) : (
+          <div className="h-7 w-7 rounded-full bg-[var(--lifeos-pink)] flex items-center justify-center text-white text-xs font-bold">
+            {displayName[0].toUpperCase()}
+          </div>
+        )}
+        {/* Green cloud-sync indicator dot */}
+        <div className="absolute top-0.5 right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 border-2 border-white" />
+      </button>
+
+      {menuOpen && (
+        <>
+          {/* Backdrop */}
+          <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+          {/* Dropdown */}
+          <div
+            className="absolute right-0 top-11 z-50 w-52 rounded-2xl border border-black/[0.08] shadow-xl overflow-hidden"
+            style={{ backgroundColor: "var(--background)" }}
+          >
+            <div className="px-4 py-3 border-b border-black/[0.06]">
+              <div className="text-xs font-bold text-black/80 truncate">
+                {(user.user_metadata?.full_name as string | undefined) ?? "Signed in"}
+              </div>
+              <div className="text-[11px] text-black/40 truncate">{user.email}</div>
+            </div>
+            <div className="flex items-center gap-2 px-4 py-2.5 text-[11px] text-emerald-600 font-semibold">
+              <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+              Cloud sync active
+            </div>
+            <button
+              onClick={() => {
+                signOut();
+                setMenuOpen(false);
+              }}
+              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold text-black/60 hover:bg-black/[0.04] transition-colors text-left border-t border-black/[0.06]"
+            >
+              Sign out
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -287,6 +380,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-1.5">
             <DarkModeToggle />
             <StreakPill />
+            <AuthButton />
           </div>
         </div>
       </header>

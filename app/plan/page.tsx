@@ -12,7 +12,7 @@ import {
   loadCalendar,
   type CalendarBlock,
   mergeCalendarFromHistory,
-} from "../lib/storage";
+} from "../lib/storage-sync";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
