@@ -670,11 +670,50 @@ ${preferenceContext ? `\nUSER PREFERENCES (learned from past sessions — follow
 ${recentHistory ? `\nUSER'S RECENT PLANNING HISTORY (last 5 sessions — use to personalize, detect patterns, avoid repetition):\n${recentHistory}` : ""}
 `;
 
+    // ── Pre-resolve all date references in the input so the AI gets exact ISO dates ──
+    // This prevents the AI from anchoring all events to the primary planning date.
+    // We resolve: today, tomorrow, tonight, and every weekday name mentioned.
+    const tomorrowIso = (() => {
+      const d = new Date(nowTz);
+      d.setDate(d.getDate() + 1);
+      return isoDateInTimeZone(d, USER_TIMEZONE);
+    })();
+
+    const weekdayNamesForResolution = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+    const resolvedDates: string[] = [];
+    const inputLowerForDates = input.toLowerCase();
+
+    // Resolve every weekday name mentioned in the input
+    for (let i = 0; i < weekdayNamesForResolution.length; i++) {
+      const name = weekdayNamesForResolution[i];
+      const short = name.slice(0, 3);
+      if (inputLowerForDates.includes(name) || inputLowerForDates.includes(short)) {
+        const iso = nextIsoForWeekday(nowTz, i as Weekday, USER_TIMEZONE);
+        resolvedDates.push(`"${name}" = ${iso}`);
+      }
+    }
+
+    // Add today/tomorrow/tonight mappings
+    if (/\b(today|tonight|this morning|this afternoon|this evening)\b/i.test(input)) {
+      resolvedDates.push(`"today/tonight" = ${todayIso}`);
+    }
+    if (/\b(tomorrow|tmrw|tmr)\b/i.test(input)) {
+      resolvedDates.push(`"tomorrow" = ${tomorrowIso}`);
+    }
+
+    const dateMapSection = resolvedDates.length > 0
+      ? `\nDATE MAP — use these exact ISO dates for each day reference, do NOT put multiple events on the same date unless the user explicitly said so:\n${resolvedDates.join("\n")}\n`
+      : "";
+
     const userPrompt = `
 USER INPUT (may be casual, abbreviated, or imperfect — interpret generously):
 "${input}"
 
-Resolved planning date: ${planning.iso}
+Primary planning date: ${planning.iso}
+Today: ${todayIso}
+Tomorrow: ${tomorrowIso}
+${dateMapSection}
+CRITICAL: Each event must be scheduled on its OWN correct date from the DATE MAP above. "Flight Friday at 6am" goes on Friday's date. "Pack tomorrow night" goes on tomorrow's date. Do NOT put all events on the same date.
 
 Interpret the input as a real person casually describing their plans. Extract what they want to do, when, and for how long — even if phrased informally. Create a plan that reflects ONLY their stated intent.
 `;
@@ -762,6 +801,7 @@ plan.assumptions = plan.assumptions.filter((x: any) => typeof x === "string");
         "gym","workout","exercise","run","walk","yoga","stretch",
         "sleep","rest","nap","bed",
         "commute","travel","transit",
+        "flight","airport","boarding","pack","packing","check-in","check in","hotel","depart","departure","arrive","arrival",
       ];
 
       const keep = (line: string) => {
