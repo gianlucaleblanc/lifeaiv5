@@ -54,40 +54,9 @@ function Icon({ name, active }: { name: "spark" | "list" | "calendar" | "user"; 
 // ─────────────────────────────────────────────────────────────
 function LogoMark() {
   return (
-    <Link href="/" className="flex items-center gap-2 group select-none">
-      {/*
-        Logo is a 1024×1024 square with ~25% whitespace padding on each side.
-        We show it at 160×50, contain, so the full wordmark is visible.
-        The bg of the header is semi-transparent gray so the white canvas blends in.
-      */}
-      {/*
-        PNG is 1024×1024 but the actual logo content sits in the center ~60%
-        of the canvas — lots of padding baked in. We oversize the image and use
-        negative margins to pull it tight so the rendered logo looks the right size.
-        mix-blend-mode:multiply kills the white background.
-      */}
-      <img
-        src="/logo.png"
-        alt="OpenHour"
-        className="transition-all duration-200 group-hover:scale-105 shrink-0"
-        style={{
-          height: 110,
-          width: "auto",
-          display: "block",
-          mixBlendMode: "multiply",
-          margin: "-28px -16px -28px -20px",
-        }}
-        onError={(e) => {
-          (e.currentTarget as HTMLImageElement).style.display = "none";
-          const next = e.currentTarget.nextElementSibling as HTMLElement | null;
-          if (next) next.style.display = "flex";
-        }}
-      />
-      {/* Text fallback (hidden when logo.png loads) */}
-      <div className="items-baseline gap-0" style={{ display: "none" }}>
-        <span className="font-black text-black" style={{ fontSize: 20, letterSpacing: "-0.05em" }}>Open</span>
-        <span className="font-black" style={{ fontSize: 20, letterSpacing: "-0.05em", color: "var(--lifeos-pink)" }}>Hour</span>
-      </div>
+    <Link href="/" className="flex items-baseline gap-0 group select-none transition-opacity duration-200 hover:opacity-80">
+      <span className="font-black text-black" style={{ fontSize: 22, letterSpacing: "-0.055em" }}>Open</span>
+      <span className="font-black" style={{ fontSize: 22, letterSpacing: "-0.055em", color: "var(--lifeos-pink)" }}>Hour</span>
     </Link>
   );
 }
