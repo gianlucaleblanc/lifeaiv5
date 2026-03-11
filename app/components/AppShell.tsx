@@ -64,7 +64,13 @@ function LogoMark() {
         src="/logo.png"
         alt="OpenHour"
         className="transition-all duration-200 group-hover:scale-105 shrink-0"
-        style={{ height: 50, width: 160, objectFit: "contain", objectPosition: "left center", display: "block" }}
+        style={{
+          height: 56,
+          width: "auto",
+          objectFit: "contain",
+          display: "block",
+          mixBlendMode: "multiply",
+        }}
         onError={(e) => {
           (e.currentTarget as HTMLImageElement).style.display = "none";
           const next = e.currentTarget.nextElementSibling as HTMLElement | null;
