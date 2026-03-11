@@ -3994,7 +3994,13 @@ export default function GeneratePage() {
       const looksLikePlanningRequest = /\b(plan\s+my\s+(?:day|week)|make\s+(?:me\s+)?a\s+plan|build\s+(?:me\s+)?(?:a\s+)?schedule|create\s+(?:me\s+)?(?:a\s+)?schedule|organize\s+my\s+(?:day|week)|routine|agenda|help\s+me\s+with\s+my\s+day)\b/i.test(ni)
         // Deadline inputs ("due at midnight", "due tonight", "due by X") should go to the AI
         // planner, not the manual event path — "midnight" is a cutoff, not a start time.
-        || /\b(due\s+(?:at|by|tonight|at\s+midnight)|deadline\s+(?:at|by)|assignment\s+due|essay\s+due|homework\s+due|paper\s+due|project\s+due)\b/i.test(ni);
+        || /\b(due\s+(?:at|by|tonight|at\s+midnight)|deadline\s+(?:at|by)|assignment\s+due|essay\s+due|homework\s+due|paper\s+due|project\s+due)\b/i.test(ni)
+        // Multi-day travel inputs — "flight X + pack Y" span multiple days and need AI to coordinate
+        || /\b(flight|flights|flying|fly)\b.{1,80}\b(pack|packing|hotel|airport|boarding|takeoff|land)\b/i.test(ni)
+        || /\b(pack|packing)\b.{1,80}\b(flight|flights|flying|fly|airport|hotel)\b/i.test(ni)
+        // Any input that explicitly spans multiple days needs the AI planner
+        || /\b(tomorrow|tonight)\b.{1,80}\b(friday|saturday|sunday|monday|tuesday|wednesday|thursday)\b/i.test(ni)
+        || /\b(friday|saturday|sunday|monday|tuesday|wednesday|thursday)\b.{1,80}\b(tomorrow|tonight)\b/i.test(ni);
 
       // ── Recurring event detection ──
       // "gym every Monday and Wednesday", "class on MWF at 10am", "yoga every Tuesday"
