@@ -24,7 +24,7 @@ import OpenAI from "openai";
 
 const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
 const DEFAULT_TIMEZONE = "America/New_York";
-const DEFAULT_MODEL = USE_CLAUDE ? "claude-opus-4-5-20251101" : (process.env.OPENAI_MODEL || "gpt-4o");
+const DEFAULT_MODEL = USE_CLAUDE ? "claude-opus-4-6" : (process.env.OPENAI_MODEL || "gpt-4o");
 
 const anthropic = USE_CLAUDE ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
 const openaiClient = USE_CLAUDE ? null : new OpenAI({ apiKey: process.env.OPENAI_API_KEY });

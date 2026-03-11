@@ -23,7 +23,7 @@ export const HAS_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
 export const HAS_OPENAI = !!process.env.OPENAI_API_KEY;
 
 export const AI_PROVIDER: "claude" | "openai" = HAS_CLAUDE ? "claude" : "openai";
-export const AI_MODEL = HAS_CLAUDE ? "claude-opus-4-5-20251101" : (process.env.OPENAI_MODEL || "gpt-4o");
+export const AI_MODEL = HAS_CLAUDE ? "claude-opus-4-6" : (process.env.OPENAI_MODEL || "gpt-4o");
 
 // ── Lazy client singletons ──────────────────────────────────────────────────
 

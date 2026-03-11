@@ -21,7 +21,7 @@ async function captureServerEvent(event: string, properties: Record<string, any>
 // ── AI Provider: Claude (preferred) → GPT-4o (fallback) ──────────────────────
 const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
 const DEFAULT_MODEL = USE_CLAUDE
-  ? "claude-opus-4-5-20251101"
+  ? "claude-opus-4-6"
   : (process.env.OPENAI_MODEL || "gpt-4o");
 
 const anthropic = USE_CLAUDE ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;

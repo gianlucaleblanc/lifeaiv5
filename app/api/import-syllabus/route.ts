@@ -30,7 +30,7 @@ async function extractTextFromDocx(buf: Buffer): Promise<string> {
 }
 
 const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
-const DEFAULT_MODEL = USE_CLAUDE ? "claude-opus-4-5-20251101" : (process.env.OPENAI_MODEL || "gpt-4o");
+const DEFAULT_MODEL = USE_CLAUDE ? "claude-opus-4-6" : (process.env.OPENAI_MODEL || "gpt-4o");
 
 async function callAI(system: string, user: string, maxTokens = 8192): Promise<string> {
   if (USE_CLAUDE) {
