@@ -1699,6 +1699,9 @@ function computeCalendarMerge(history: HistoryItem, opts?: { stepMin?: number; d
     if (existingForDay.some((b) => b.title.toLowerCase() === norm && b.meta?.kind !== "plan")) continue;
     // Skip if already placed by the guaranteed-keywords pass
     if (newBlocks.some((b) => b.date === baseDate && b.title.toLowerCase() === norm)) continue;
+    // Skip if already placed on a DIFFERENT date by a relative/weekday-anchored extractor.
+    // E.g. "Pack" placed on tomorrow by PASS 1 should not also appear on Friday (baseDate).
+    if (newBlocks.some((b) => b.date !== baseDate && b.title.toLowerCase() === norm)) continue;
 
     // If the title itself includes an explicit time (rare but possible), honor it.
     const explicit = parseExplicitTimeToMins(title);
