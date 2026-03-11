@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 
 // Lazy imports so the app can still boot even if the user hasn't run `npm install` yet.
@@ -28,9 +28,8 @@ async function extractTextFromDocx(buf: Buffer): Promise<string> {
   return typeof out?.value === "string" ? out.value : "";
 }
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const rawModel = process.env.OPENAI_MODEL || "gpt-4o";
-const DEFAULT_MODEL = rawModel.trim() || "gpt-4o";
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const DEFAULT_MODEL = "claude-opus-4-5-20251101";
 
 function safeJsonParse(text: string): any {
   try {
@@ -1780,20 +1779,19 @@ Use fixed values only — do NOT vary within a confidence tier:
 
     const user = `USER INSTRUCTIONS (optional):\n${instructions || "(none)"}\n\nSYLLABUS TEXT (clipped):\n\n${clipped}`;
 
-    // Use Chat Completions API exclusively for reliability.
-    // temperature: 0 → fully deterministic outputs for the same syllabus text.
+    // Use Claude Messages API for reliable structured extraction.
     const cc = await withTimeout(
-      client.chat.completions.create({
+      client.messages.create({
         model: DEFAULT_MODEL,
-        temperature: 0,
-        response_format: { type: "json_object" },
+        max_tokens: 8192,
+        temperature: 1,
+        system,
         messages: [
-          { role: "system", content: system },
           { role: "user", content: user },
         ],
       })
     );
-    const raw = safeJsonParse(cc.choices?.[0]?.message?.content ?? "{}");
+    const raw = safeJsonParse((cc.content?.[0] as any)?.text ?? "{}");
 
     const events = Array.isArray(raw?.events) ? raw.events : [];
     const meetings = Array.isArray(raw?.meetings) ? raw.meetings : [];

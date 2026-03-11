@@ -19,12 +19,11 @@
  *   data: {"type":"error","message":"..."}\n\n
  */
 
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_TIMEZONE = "America/New_York";
-const rawModel = process.env.OPENAI_MODEL || "gpt-4o";
-const DEFAULT_MODEL = rawModel.trim() || "gpt-4o";
+const DEFAULT_MODEL = "claude-opus-4-5-20251101";
 
 // ── Shared utilities (duplicated from route.ts to keep files independent) ──────
 
@@ -88,9 +87,9 @@ function sseChunk(data: object): Uint8Array {
 // ── POST handler ──────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
-  if (!process.env.OPENAI_API_KEY) {
+  if (!process.env.ANTHROPIC_API_KEY) {
     return new Response(
-      `data: ${JSON.stringify({ type: "error", message: "Missing OPENAI_API_KEY" })}\n\n`,
+      `data: ${JSON.stringify({ type: "error", message: "Missing ANTHROPIC_API_KEY" })}\n\n`,
       { status: 500, headers: { "Content-Type": "text/event-stream" } }
     );
   }
@@ -156,49 +155,6 @@ export async function POST(req: Request) {
     return `RELEVANT PAST EVENTS:\n${relevant.map((b: any) => `- ${b.title} on ${b.date} at ${Math.floor(b.startMin/60)}:${String(b.startMin%60).padStart(2,"0")}`).join("\n")}`;
   })();
 
-  // Tool definition (same schema as route.ts)
-  const planTool: any = {
-    type: "function",
-    function: {
-      name: "create_plan",
-      description: "Create a structured daily plan and calendar schedule from natural language input",
-      parameters: {
-        type: "object",
-        properties: {
-          detectedTasks: { type: "array", items: { type: "string" } },
-          assumptions:   { type: "array", items: { type: "string" } },
-          priorities:    { type: "array", items: { type: "string" } },
-          schedule: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                time: { type: "string" },
-                plan: { type: "array", items: { type: "string" } },
-              },
-              required: ["time", "plan"],
-            },
-          },
-          habit: {
-            type: "object",
-            properties: {
-              title: { type: "string" },
-              why:   { type: "string" },
-              how:   { type: "string" },
-            },
-            required: ["title", "why", "how"],
-          },
-          coach:          { type: "string" },
-          personalInsight:{ type: "string" },
-          streak:         { type: "number" },
-          confidence:     { type: "number" },
-          ambiguities:    { type: "array", items: { type: "string" } },
-        },
-        required: ["detectedTasks","assumptions","priorities","schedule","habit","coach","personalInsight","streak","confidence","ambiguities"],
-      },
-    },
-  };
-
   const STATIC_SYSTEM = `You are LifeOS — a scheduling engine that thinks like a brilliant personal assistant.
 
 You never guess wrong about dates silently. You flag uncertainty rather than assume.
@@ -234,50 +190,89 @@ ${dateMapSection ? `\nCRITICAL: Use DATE MAP above. Every event on its own date.
 
       try {
         // Phase 1: Stream the COACH message token-by-token for progressive display
-        // We use a separate streaming chat call (no tool calling — tool streaming is
-        // complex and less reliable). This gives the user instant visual feedback.
-        const coachStream = await client.chat.completions.create({
+        // Anthropic streaming uses stream() method with async iteration.
+        const coachStream = client.messages.stream({
           model: DEFAULT_MODEL,
-          temperature: 0.4,
-          stream: true,
+          max_tokens: 100,
+          system: `${STATIC_SYSTEM}\n\n${DYNAMIC_CONTEXT}`,
           messages: [
-            { role: "system", content: `${STATIC_SYSTEM}\n\n${DYNAMIC_CONTEXT}` },
             {
               role: "user",
               content: `${userPrompt}\n\nWrite ONLY a short, punchy, motivational coach message (1-2 sentences) directly about what the user is doing today. Be specific to their activity. No generic phrases. No JSON.`,
             },
           ],
-          max_tokens: 80,
         });
 
         let coachText = "";
-        for await (const chunk of coachStream) {
-          const delta = chunk.choices?.[0]?.delta?.content ?? "";
-          if (delta) {
-            coachText += delta;
-            enqueue({ type: "coach", delta });
+        for await (const event of coachStream) {
+          if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+            const delta = event.delta.text ?? "";
+            if (delta) {
+              coachText += delta;
+              enqueue({ type: "coach", delta });
+            }
           }
         }
 
-        // Phase 2: Get the full structured plan via tool calling (non-streaming)
-        const planCall = await client.chat.completions.create({
+        // Phase 2: Get the full structured plan via Anthropic tool use (non-streaming)
+        const planTool: Anthropic.Tool = {
+          name: "create_plan",
+          description: "Create a structured daily plan and calendar schedule from natural language input",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              detectedTasks: { type: "array", items: { type: "string" } },
+              assumptions:   { type: "array", items: { type: "string" } },
+              priorities:    { type: "array", items: { type: "string" } },
+              schedule: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    time: { type: "string" },
+                    plan: { type: "array", items: { type: "string" } },
+                  },
+                  required: ["time", "plan"],
+                },
+              },
+              habit: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  why:   { type: "string" },
+                  how:   { type: "string" },
+                },
+                required: ["title", "why", "how"],
+              },
+              coach:          { type: "string" },
+              personalInsight:{ type: "string" },
+              streak:         { type: "number" },
+              confidence:     { type: "number" },
+              ambiguities:    { type: "array", items: { type: "string" } },
+            },
+            required: ["detectedTasks","assumptions","priorities","schedule","habit","coach","personalInsight","streak","confidence","ambiguities"],
+          },
+        };
+
+        const planCall = await client.messages.create({
           model: DEFAULT_MODEL,
-          temperature: 0.3,
-          tool_choice: { type: "function", function: { name: "create_plan" } },
+          max_tokens: 4096,
+          temperature: 1,
+          tool_choice: { type: "tool", name: "create_plan" },
           tools: [planTool],
+          system: `${STATIC_SYSTEM}\n\n${DYNAMIC_CONTEXT}`,
           messages: [
-            { role: "system", content: STATIC_SYSTEM },
-            { role: "system", content: DYNAMIC_CONTEXT },
             { role: "user", content: userPrompt },
           ],
         });
 
-        const toolCall = planCall.choices?.[0]?.message?.tool_calls?.[0] as any;
+        const toolUseBlock = planCall.content?.find((b: any) => b.type === "tool_use") as any;
         let raw: any;
-        if (toolCall?.function?.arguments) {
-          raw = safeJsonParse(toolCall.function.arguments);
+        if (toolUseBlock?.input) {
+          raw = toolUseBlock.input;
         } else {
-          raw = safeJsonParse(planCall.choices?.[0]?.message?.content ?? "{}");
+          const textBlock = planCall.content?.find((b: any) => b.type === "text") as any;
+          raw = safeJsonParse(textBlock?.text ?? "{}");
         }
 
         // Override coach with the streamed version (more fluid, already shown to user)

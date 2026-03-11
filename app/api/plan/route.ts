@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 
 const POSTHOG_KEY = "phc_5rgri5Bb6XL3CW4b8w82qMPWjCtwTIzGQ7eH54cMGve";
@@ -17,14 +17,12 @@ async function captureServerEvent(event: string, properties: Record<string, any>
   } catch { /* non-blocking */ }
 }
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
 const DEFAULT_TIMEZONE = "America/New_York";
-// Normalize model name - ensure it's a valid OpenAI model
-const rawModel = process.env.OPENAI_MODEL || "gpt-4o";
-const DEFAULT_MODEL = rawModel.trim() || "gpt-4o";
+const DEFAULT_MODEL = "claude-opus-4-5-20251101";
 
 type Weekday = 0|1|2|3|4|5|6; // Sun..Sat
 
@@ -283,9 +281,9 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
+    if (!process.env.ANTHROPIC_API_KEY) {
       return NextResponse.json(
-        { error: "Missing OPENAI_API_KEY in environment variables." },
+        { error: "Missing ANTHROPIC_API_KEY in environment variables." },
         { status: 500 }
       );
     }
@@ -337,19 +335,19 @@ ${JSON.stringify(calendarBlocks.slice(0, 50).map((b: any) => ({ id: b.id, title:
       const mutationUserPrompt = `User instruction: "${input}"`;
 
       const cc = await withTimeout(
-        client.chat.completions.create({
+        client.messages.create({
           model: DEFAULT_MODEL,
+          max_tokens: 1024,
           temperature: 0.2,
-          response_format: { type: "json_object" },
+          system: mutationSystem,
           messages: [
-            { role: "system", content: mutationSystem },
             { role: "user", content: mutationUserPrompt },
           ],
         }),
         12000
       );
 
-      const text = cc.choices?.[0]?.message?.content ?? "{}";
+      const text = (cc.content?.[0] as any)?.text ?? "{}";
       const parsed = safeJsonParse(text);
       return NextResponse.json({ operations: Array.isArray(parsed?.operations) ? parsed.operations : [] });
     }
@@ -385,19 +383,19 @@ RULES:
 5. Return ONLY valid JSON. No markdown.`;
 
       const cc = await withTimeout(
-        client.chat.completions.create({
+        client.messages.create({
           model: DEFAULT_MODEL,
+          max_tokens: 2048,
           temperature: 0.3,
-          response_format: { type: "json_object" },
+          system: breakdownSystem,
           messages: [
-            { role: "system", content: breakdownSystem },
             { role: "user", content: input },
           ],
         }),
         12000
       );
 
-      const text = cc.choices?.[0]?.message?.content ?? "{}";
+      const text = (cc.content?.[0] as any)?.text ?? "{}";
       const parsed = safeJsonParse(text);
       return NextResponse.json({ blocks: Array.isArray(parsed?.blocks) ? parsed.blocks : [] });
     }
@@ -505,13 +503,13 @@ Fill every hour from ${wakeTime} to ${sleepTime} with a realistic, personalized 
       let fullDayRaw: any;
       try {
         fullDayRaw = await withTimeout(
-          client.chat.completions.create({
+          client.messages.create({
             model: DEFAULT_MODEL,
+            max_tokens: 4096,
             temperature: 0.6,
-            response_format: { type: "json_object" },
+            system: fullDaySystem,
             messages: [
-              { role: "system", content: fullDaySystem },
-              { role: "user",   content: fullDayUserPrompt },
+              { role: "user", content: fullDayUserPrompt },
             ],
           }),
           28_000
@@ -525,7 +523,7 @@ Fill every hour from ${wakeTime} to ${sleepTime} with a realistic, personalized 
 
       let fullDayPlan: any;
       try {
-        fullDayPlan = JSON.parse(fullDayRaw.choices?.[0]?.message?.content ?? "{}");
+        fullDayPlan = JSON.parse((fullDayRaw.content?.[0] as any)?.text ?? "{}");
       } catch {
         return NextResponse.json({ error: "Failed to parse full-day plan from AI." }, { status: 500 });
       }
@@ -624,18 +622,18 @@ RULES:
 
     try {
       const extractionResult = await withTimeout(
-        client.chat.completions.create({
+        client.messages.create({
           model: DEFAULT_MODEL,
-          temperature: 0.1,
-          response_format: { type: "json_object" },
+          max_tokens: 1024,
+          temperature: 1, // Claude requires temperature 1 for lowest randomness (unlike OpenAI)
+          system: extractionSystem,
           messages: [
-            { role: "system", content: extractionSystem },
             { role: "user", content: extractionUserPrompt },
           ],
         }),
         10000
       );
-      const extractedRaw = safeJsonParse(extractionResult.choices?.[0]?.message?.content ?? "{}");
+      const extractedRaw = safeJsonParse((extractionResult.content?.[0] as any)?.text ?? "{}");
       extractedEvents = Array.isArray(extractedRaw?.events) ? extractedRaw.events : [];
       detectedLanguage = typeof extractedRaw?.language === "string" ? extractedRaw.language : "en";
     } catch {
@@ -742,63 +740,60 @@ ${FEW_SHOT_EXAMPLES}`;
       recentHistory ? `RECENT HISTORY (last 5 — personalise, avoid repeating):\n${recentHistory}` : "",
     ].filter(Boolean).join("\n\n");
 
-    // ── Tool definition (schema-enforced — model cannot deviate) ──────────────────
-    const planTool: any = {
-      type: "function",
-      function: {
-        name: "create_plan",
-        description: "Create a structured daily plan and calendar schedule from natural language input",
-        parameters: {
-          type: "object",
-          properties: {
-            detectedTasks: {
-              type: "array", items: { type: "string" },
-              description: "Short phrases for each task/event the user mentioned"
-            },
-            assumptions: {
-              type: "array", items: { type: "string" },
-              description: "All inferred details: duration guesses, AM/PM choices, date interpretations"
-            },
-            priorities: {
-              type: "array", items: { type: "string" },
-              description: "Top 1-3 priorities for this plan"
-            },
-            schedule: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  time: { type: "string", description: "Clock time like '7:00 AM' or bucket like 'MORNING'" },
-                  plan: { type: "array", items: { type: "string" }, description: "Event titles for this time slot" }
-                },
-                required: ["time", "plan"]
-              },
-              description: "The full schedule — one entry per distinct event/time slot"
-            },
-            habit: {
+    // ── Tool definition (Anthropic format — schema-enforced) ─────────────────────
+    const planTool: Anthropic.Tool = {
+      name: "create_plan",
+      description: "Create a structured daily plan and calendar schedule from natural language input",
+      input_schema: {
+        type: "object" as const,
+        properties: {
+          detectedTasks: {
+            type: "array", items: { type: "string" },
+            description: "Short phrases for each task/event the user mentioned"
+          },
+          assumptions: {
+            type: "array", items: { type: "string" },
+            description: "All inferred details: duration guesses, AM/PM choices, date interpretations"
+          },
+          priorities: {
+            type: "array", items: { type: "string" },
+            description: "Top 1-3 priorities for this plan"
+          },
+          schedule: {
+            type: "array",
+            items: {
               type: "object",
               properties: {
-                title: { type: "string" },
-                why: { type: "string" },
-                how: { type: "string" }
+                time: { type: "string", description: "Clock time like '7:00 AM'" },
+                plan: { type: "array", items: { type: "string" }, description: "Event titles for this time slot" }
               },
-              required: ["title", "why", "how"],
-              description: "One small habit suggestion relevant to today's activities"
+              required: ["time", "plan"]
             },
-            coach: { type: "string", description: "Short punchy motivational message, directly relevant to what they're doing" },
-            personalInsight: { type: "string", description: "1-2 sentences tied to their actual activity, not generic" },
-            streak: { type: "number", description: "Streak count — use 1" },
-            confidence: {
-              type: "number",
-              description: "0.0-1.0: how confident you are in the schedule. 1.0=certain, 0.6=guessed something, 0.3=multiple ambiguities"
-            },
-            ambiguities: {
-              type: "array", items: { type: "string" },
-              description: "Anything you had to guess: AM/PM choice, duration, which date, etc. Empty array if certain."
-            }
+            description: "The full schedule — one entry per distinct event/time slot"
           },
-          required: ["detectedTasks","assumptions","priorities","schedule","habit","coach","personalInsight","streak","confidence","ambiguities"]
-        }
+          habit: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              why: { type: "string" },
+              how: { type: "string" }
+            },
+            required: ["title", "why", "how"],
+            description: "One small habit suggestion relevant to today's activities"
+          },
+          coach: { type: "string", description: "Short punchy motivational message, directly relevant to what they're doing" },
+          personalInsight: { type: "string", description: "1-2 sentences tied to their actual activity, not generic" },
+          streak: { type: "number", description: "Streak count — use 1" },
+          confidence: {
+            type: "number",
+            description: "0.0-1.0: how confident you are in the schedule. 1.0=certain, 0.6=guessed something, 0.3=multiple ambiguities"
+          },
+          ambiguities: {
+            type: "array", items: { type: "string" },
+            description: "Anything you had to guess: AM/PM choice, duration, which date, etc. Empty array if certain."
+          }
+        },
+        required: ["detectedTasks","assumptions","priorities","schedule","habit","coach","personalInsight","streak","confidence","ambiguities"]
       }
     };
 
@@ -810,34 +805,33 @@ CRITICAL: ${dateMapSection ? "Use DATE MAP above. Every event on its own date." 
     let raw: any;
     try {
       const cc = await withTimeout(
-        client.chat.completions.create({
+        client.messages.create({
           model: DEFAULT_MODEL,
-          temperature: 0.3,
-          tool_choice: { type: "function", function: { name: "create_plan" } },
+          max_tokens: 4096,
+          temperature: 1, // Claude requires temp=1 for tool_choice (API restriction)
+          tool_choice: { type: "tool", name: "create_plan" },
           tools: [planTool],
+          system: `${STATIC_SYSTEM}\n\n${DYNAMIC_CONTEXT}`,
           messages: [
-            // Static prompt separated from dynamic context so caching applies to static part
-            { role: "system", content: STATIC_SYSTEM },
-            { role: "system", content: DYNAMIC_CONTEXT },
             { role: "user", content: userPrompt },
           ],
         }),
         25000
       );
 
-      // Tool call response — parse from tool_calls, not message.content
-      const toolCall = cc.choices?.[0]?.message?.tool_calls?.[0] as any;
-      if (toolCall?.function?.arguments) {
-        raw = safeJsonParse(toolCall.function.arguments);
+      // Anthropic tool use — content block with type "tool_use"
+      const toolUseBlock = cc.content?.find((b: any) => b.type === "tool_use") as any;
+      if (toolUseBlock?.input) {
+        raw = toolUseBlock.input;
       } else {
-        // Fallback: try content if tool call not present
-        raw = safeJsonParse(cc.choices?.[0]?.message?.content ?? "{}");
+        // Fallback: parse text content
+        const textBlock = cc.content?.find((b: any) => b.type === "text") as any;
+        raw = safeJsonParse(textBlock?.text ?? "{}");
       }
     } catch (apiError: any) {
-      console.error("OpenAI API Error:", {
+      console.error("Claude API Error:", {
         message: apiError?.message,
         status: apiError?.status,
-        type: apiError?.type,
         model: DEFAULT_MODEL,
       });
       return NextResponse.json(
@@ -871,19 +865,19 @@ If no errors found, approved=true, errors=[].
 Be strict but fair — only flag real mistakes.`;
 
         const verifyResult = await withTimeout(
-          client.chat.completions.create({
+          client.messages.create({
             model: DEFAULT_MODEL,
-            temperature: 0.0,
-            response_format: { type: "json_object" },
+            max_tokens: 512,
+            temperature: 1, // Claude API: temperature must be 1 when extended thinking is off; lowest effective randomness
+            system: verifySystem,
             messages: [
-              { role: "system", content: verifySystem },
               { role: "user", content: `Original input: "${input}"\n\nGenerated plan:\n${JSON.stringify({ schedule: raw.schedule, assumptions: raw.assumptions }, null, 2)}` },
             ],
           }),
           8000
         );
 
-        const verifyRaw = safeJsonParse(verifyResult.choices?.[0]?.message?.content ?? "{}");
+        const verifyRaw = safeJsonParse((verifyResult.content?.[0] as any)?.text ?? "{}");
         if (!verifyRaw?.approved && Array.isArray(verifyRaw?.errors) && verifyRaw.errors.length > 0) {
           // Verification found issues — add them to ambiguities so user sees warning
           const existingAmbiguities: string[] = Array.isArray(raw.ambiguities) ? raw.ambiguities : [];

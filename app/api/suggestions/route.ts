@@ -1,8 +1,8 @@
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const DEFAULT_MODEL = "claude-opus-4-5-20251101";
 
 type Anchor = {
   date: string; // YYYY-MM-DD
@@ -300,17 +300,17 @@ export async function POST(req: Request) {
 
     const user = JSON.stringify({ input, anchors });
 
-    const cc = await client.chat.completions.create({
+    const cc = await client.messages.create({
       model: DEFAULT_MODEL,
-      temperature: 0.3,
-      response_format: { type: "json_object" },
+      max_tokens: 1024,
+      temperature: 1,
+      system,
       messages: [
-        { role: "system", content: system },
         { role: "user", content: user },
       ],
     });
 
-    const rawText = cc.choices?.[0]?.message?.content ?? "{}";
+    const rawText = (cc.content?.[0] as any)?.text ?? "{}";
     let raw: any = {};
     try {
       raw = JSON.parse(rawText);

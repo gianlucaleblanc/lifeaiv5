@@ -1,8 +1,8 @@
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const DEFAULT_MODEL = "claude-opus-4-5-20251101";
 
 // This route receives a batch of feedback entries + the current preferences,
 // and asks the AI to distil them into updated preference notes.
@@ -17,7 +17,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ preferences: currentPreferences ?? {} });
     }
 
-    if (!process.env.OPENAI_API_KEY) {
+    if (!process.env.ANTHROPIC_API_KEY) {
       return NextResponse.json({ preferences: currentPreferences ?? {} }, { status: 200 });
     }
 
@@ -67,17 +67,17 @@ RULES:
 
     const user = `Existing preferences:\n${existingNotes || "(none yet)"}\n\nNew feedback from this session:\n${feedbackLines}\n\nOriginal prompt that generated these blocks: "${sessionInput ?? ""}"`;
 
-    const cc = await client.chat.completions.create({
+    const cc = await client.messages.create({
       model: DEFAULT_MODEL,
-      temperature: 0.2,
-      response_format: { type: "json_object" },
+      max_tokens: 1024,
+      temperature: 1,
+      system,
       messages: [
-        { role: "system", content: system },
         { role: "user", content: user },
       ],
     });
 
-    const rawText = cc.choices?.[0]?.message?.content ?? "{}";
+    const rawText = (cc.content?.[0] as any)?.text ?? "{}";
     let updates: any = {};
     try { updates = JSON.parse(rawText); } catch { updates = {}; }
 
