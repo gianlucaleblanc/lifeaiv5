@@ -4864,30 +4864,17 @@ export default function GeneratePage() {
           ════════════════════════════════════ */}
       <div className="flex flex-col items-center justify-center text-center lg:pt-2">
 
-      {/* ── Eyebrow tag ── */}
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: "easeOut" }}
-        className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 mb-6"
-        style={{ background: "rgba(217,108,125,0.12)", border: "1px solid rgba(217,108,125,0.28)" }}
-      >
-        <span className="h-1.5 w-1.5 rounded-full bg-[var(--lifeos-pink)] animate-pulse" />
-        <span className="text-xs font-bold tracking-wide" style={{ color: "var(--lifeos-pink)" }}>Free · No download · Works in 10 seconds</span>
-      </motion.div>
-
       {/* ── Hero headline ── */}
       <motion.h1
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, ease: "easeOut", delay: 0.05 }}
-        className="text-5xl sm:text-[66px] xl:text-[76px] font-black text-black leading-[0.97] max-w-[680px]"
+        transition={{ duration: 0.45, ease: "easeOut" }}
+        className="text-5xl sm:text-[62px] xl:text-[72px] font-black text-black leading-[0.97] max-w-[640px]"
         style={{ letterSpacing: "-0.05em" }}
       >
         Type your day.
         <br />
         <span style={{
-          color: "var(--lifeos-pink)",
           background: "linear-gradient(135deg, #e8758a 0%, #d96c7d 50%, #c45870 100%)",
           WebkitBackgroundClip: "text",
           WebkitTextFillColor: "transparent",
@@ -4896,45 +4883,19 @@ export default function GeneratePage() {
       </motion.h1>
 
       <motion.p
-        initial={{ opacity: 0, y: 10 }}
+        initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, ease: "easeOut", delay: 0.1 }}
-        className="mt-4 text-[15px] text-black/40 font-medium max-w-[400px] leading-relaxed"
+        transition={{ duration: 0.4, ease: "easeOut", delay: 0.08 }}
+        className="mt-3 text-[15px] font-medium max-w-[360px] leading-relaxed"
+        style={{ color: "rgba(0,0,0,0.40)" }}
       >
-        Stop manually dragging events. Just describe what you have going on — assignments, gym, meals — and OpenHour builds your full schedule instantly.
+        Describe your day — assignments, gym, meetings — and get a full schedule instantly.
       </motion.p>
 
-      {/* ── Social proof + streak ── */}
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: "easeOut", delay: 0.15 }}
-        className="mt-4 flex items-center gap-3 flex-wrap justify-center"
-      >
-        <div className="flex items-center gap-1.5 text-xs text-black/35 font-medium">
-          <span>⚡</span>
-          <span>No sign-up required</span>
-        </div>
-        <span className="text-black/15">·</span>
-        <div className="flex items-center gap-1.5 text-xs text-black/35 font-medium">
-          <span>📅</span>
-          <span>Adds to your calendar in seconds</span>
-        </div>
-        <span className="text-black/15">·</span>
-        <div className="flex items-center gap-1.5 text-xs text-black/35 font-medium">
-          <span>🤖</span>
-          <span>Powered by GPT-4o</span>
-        </div>
-      </motion.div>
-
-      {/* ── Streak badge ── */}
-      <div className="mt-3">
+      {/* ── Streak + feedback badges (self-hide when empty) ── */}
+      <div className="mt-3 flex items-center gap-2 flex-wrap justify-center">
         <StreakBadge />
-      </div>
-
-      {/* ── Training badge — shows when user has given feedback ── */}
-      {(feedbackSessions > 0 || pendingFeedback.length > 0) && (
-        <div className="mt-3">
+        {(feedbackSessions > 0 || pendingFeedback.length > 0) && (
           <FeedbackBadge
             sessions={feedbackSessions}
             pending={pendingFeedback.length}
@@ -4945,45 +4906,15 @@ export default function GeneratePage() {
               }
             }}
           />
-        </div>
-      )}
-
-      {/* ── Live demo chip — shows how it works before user types ── */}
-      {!input && !loading && !planPreview && (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, ease: "easeOut", delay: 0.22 }}
-          className="mt-6 flex flex-col items-center gap-2"
-        >
-          <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-faint)]">Try something like</p>
-          <div className="flex flex-wrap justify-center gap-1.5">
-            {[
-              { label: "Essay due at midnight + gym", input: "Essay due at midnight, gym this morning, lunch and dinner" },
-              { label: "Plan my whole week", input: "Plan my week: study Monday, gym Tuesday Thursday, dentist Wednesday 2pm" },
-              { label: "Flight Friday", input: "Flight Friday at 6am, need to pack tomorrow night" },
-            ].map(({ label, input: chipInput }) => (
-              <button
-                key={label}
-                onClick={() => setInput(chipInput)}
-                className="rounded-full px-4 py-1.5 text-[12px] font-semibold transition-all hover:scale-[1.02] active:scale-[0.98]"
-                style={{ background: "var(--surface-raised)", border: "1px solid var(--divider)", color: "var(--text-muted)" }}
-                onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(var(--lifeos-pink-rgb),0.35)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--lifeos-pink)"; }}
-                onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--divider)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-muted)"; }}
-              >
-                {label} →
-              </button>
-            ))}
-          </div>
-        </motion.div>
-      )}
+        )}
+      </div>
 
       {/* ── Input card ── */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: "easeOut", delay: 0.15 }}
-        className="mt-6 w-full max-w-xl"
+        transition={{ duration: 0.5, ease: "easeOut", delay: 0.12 }}
+        className="mt-5 w-full max-w-xl"
       >
 
         {/* File chip (shown above card when attached) */}
@@ -5029,6 +4960,28 @@ export default function GeneratePage() {
                 : rotatingPlaceholder
             }
           />
+
+          {/* Inline example chips — shown inside the card when empty */}
+          {!input && !pendingFile && (
+            <div className="flex items-center gap-1.5 px-4 pb-3 flex-wrap">
+              {[
+                { label: "Essay due midnight + gym", v: "Essay due at midnight, gym this morning, lunch and dinner" },
+                { label: "Plan my whole week", v: "Plan my week: study Monday, gym Tuesday Thursday, dentist Wednesday 2pm" },
+                { label: "Flight Friday 6am", v: "Flight Friday at 6am, need to pack tomorrow night" },
+              ].map(({ label, v }) => (
+                <button
+                  key={label}
+                  onClick={() => setInput(v)}
+                  className="rounded-full px-3 py-1 text-[11px] font-semibold transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  style={{ background: "rgba(0,0,0,0.04)", border: "1px solid rgba(0,0,0,0.07)", color: "rgba(0,0,0,0.45)" }}
+                  onMouseOver={(e) => { const el = e.currentTarget as HTMLButtonElement; el.style.background = "rgba(217,108,125,0.08)"; el.style.borderColor = "rgba(217,108,125,0.3)"; el.style.color = "var(--lifeos-pink)"; }}
+                  onMouseOut={(e) => { const el = e.currentTarget as HTMLButtonElement; el.style.background = "rgba(0,0,0,0.04)"; el.style.borderColor = "rgba(0,0,0,0.07)"; el.style.color = "rgba(0,0,0,0.45)"; }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Card bottom bar */}
           <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
