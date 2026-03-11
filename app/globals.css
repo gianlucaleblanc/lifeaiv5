@@ -4,6 +4,7 @@
   /* LifeOS brand */
   --lifeos-pink: #d96c7d;
   --lifeos-pink-2: #d86b7c;
+  --lifeos-pink-rgb: 217, 108, 125;
   --lifeos-cream: #fff7f9;
   --lifeos-card: #ffffff;
   --lifeos-ink: #111114;
@@ -12,31 +13,59 @@
   --lifeos-border-soft: rgba(17, 17, 20, 0.08);
 
   /* App defaults */
-  --background: #ffffff;
+  --background: #f9f8f8;
+  --background-rgb: 249, 248, 248;
   --foreground: var(--lifeos-ink);
 
-  /* Shadow system */
-  --shadow-card: 0 2px 16px rgba(0,0,0,0.06), 0 8px 40px rgba(0,0,0,0.04);
-  --shadow-card-hover: 0 4px 24px rgba(0,0,0,0.1), 0 12px 48px rgba(0,0,0,0.07);
-  --shadow-modal: 0 24px 64px rgba(0,0,0,0.18);
+  /* ── Shadow system (5-tier) ── */
+  --shadow-xs:   0 1px 2px rgba(0,0,0,0.04), 0 1px 6px rgba(0,0,0,0.03);
+  --shadow-sm:   0 2px 8px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+  --shadow-md:   0 4px 16px rgba(0,0,0,0.08), 0 12px 40px rgba(0,0,0,0.06);
+  --shadow-lg:   0 8px 32px rgba(0,0,0,0.10), 0 24px 64px rgba(0,0,0,0.08);
+  --shadow-xl:   0 20px 60px rgba(0,0,0,0.16), 0 40px 80px rgba(0,0,0,0.10);
+  --shadow-accent:       0 2px 10px rgba(217,108,125,0.22), 0 4px 20px rgba(217,108,125,0.14);
+  --shadow-accent-hover: 0 4px 18px rgba(217,108,125,0.32), 0 8px 32px rgba(217,108,125,0.18);
+  /* Legacy aliases */
+  --shadow-card: var(--shadow-sm);
+  --shadow-card-hover: var(--shadow-md);
+  --shadow-modal: var(--shadow-xl);
 
-  /* Surface tokens */
+  /* ── Surface tokens ── */
   --surface-base: #ffffff;
-  --surface-raised: #ffffff;
+  --surface-raised: #fafafa;
   --surface-overlay: #ffffff;
-  --surface-subtle: rgba(0,0,0,0.025);
+  --surface-subtle: rgba(0,0,0,0.028);
   --surface-hover: rgba(0,0,0,0.04);
   --surface-active: rgba(0,0,0,0.07);
 
   /* Divider / separator */
   --divider: rgba(0,0,0,0.08);
 
-  /* Text tokens */
+  /* ── Text tokens ── */
   --text-primary: rgba(0,0,0,0.88);
   --text-secondary: rgba(0,0,0,0.50);
-  --text-tertiary: rgba(0,0,0,0.35);
+  --text-tertiary: rgba(0,0,0,0.36);
   --text-faint: rgba(0,0,0,0.22);
-  --text-placeholder: rgba(0,0,0,0.22);
+  --text-placeholder: rgba(0,0,0,0.25);
+
+  /* ── Typography scale ── */
+  --font-2xs: 10px;
+  --font-xs:  11px;
+  --font-sm:  13px;
+  --font-base: 15px;
+  --font-md:  17px;
+  --font-lg:  20px;
+  --font-xl:  24px;
+  --font-2xl: 32px;
+
+  /* ── Letter-spacing scale ── */
+  --tracking-tightest: -0.04em;
+  --tracking-tight:    -0.025em;
+  --tracking-snug:     -0.015em;
+  --tracking-normal:    0em;
+  --tracking-wide:      0.03em;
+  --tracking-wider:     0.07em;
+  --tracking-widest:    0.10em;
 }
 
 @theme inline {
@@ -55,43 +84,51 @@
 
 html.dark {
   /* Flip Tailwind's built-in black/white tokens */
-  --color-black: #ede8eb;
-  --color-white: #201b1e;
+  --color-black: #e8e4e8;
+  --color-white: #1c1c1e;
 
   /* LifeOS brand overrides */
-  --lifeos-cream: #161113;
-  --lifeos-card: #201b1e;
-  --lifeos-ink: #ede8eb;
-  --lifeos-muted: rgba(237, 232, 235, 0.6);
-  --lifeos-border: rgba(237, 232, 235, 0.13);
-  --lifeos-border-soft: rgba(237, 232, 235, 0.07);
+  --lifeos-cream: #111113;
+  --lifeos-card: #1c1c1e;
+  --lifeos-ink: #e8e4e8;
+  --lifeos-muted: rgba(232, 228, 232, 0.6);
+  --lifeos-border: rgba(232, 228, 232, 0.12);
+  --lifeos-border-soft: rgba(232, 228, 232, 0.07);
 
   /* App background / foreground */
-  --background: #121012;
-  --foreground: #ede8eb;
+  --background: #111113;
+  --background-rgb: 17, 17, 19;
+  --foreground: #e8e4e8;
 
-  /* Shadow system — more visible on dark */
-  --shadow-card: 0 2px 12px rgba(0,0,0,0.35), 0 8px 32px rgba(0,0,0,0.25);
-  --shadow-card-hover: 0 4px 20px rgba(0,0,0,0.45), 0 12px 48px rgba(0,0,0,0.35);
-  --shadow-modal: 0 24px 64px rgba(0,0,0,0.55);
+  /* Shadow system — stronger on dark */
+  --shadow-xs:   0 1px 2px rgba(0,0,0,0.28), 0 1px 6px rgba(0,0,0,0.20);
+  --shadow-sm:   0 2px 8px rgba(0,0,0,0.38), 0 4px 16px rgba(0,0,0,0.28);
+  --shadow-md:   0 4px 16px rgba(0,0,0,0.50), 0 12px 40px rgba(0,0,0,0.36);
+  --shadow-lg:   0 8px 32px rgba(0,0,0,0.58), 0 24px 64px rgba(0,0,0,0.44);
+  --shadow-xl:   0 20px 60px rgba(0,0,0,0.65), 0 40px 80px rgba(0,0,0,0.52);
+  --shadow-accent:       0 2px 12px rgba(217,108,125,0.28);
+  --shadow-accent-hover: 0 4px 22px rgba(217,108,125,0.40);
+  --shadow-card: var(--shadow-sm);
+  --shadow-card-hover: var(--shadow-md);
+  --shadow-modal: var(--shadow-xl);
 
-  /* Surface tokens */
-  --surface-base: #201b1e;
-  --surface-raised: #271f23;
-  --surface-overlay: #2d2629;
-  --surface-subtle: rgba(255,255,255,0.03);
-  --surface-hover: rgba(255,255,255,0.055);
-  --surface-active: rgba(255,255,255,0.09);
+  /* Surface tokens — clean neutral dark (no pink cast) */
+  --surface-base: #1c1c1e;
+  --surface-raised: #242426;
+  --surface-overlay: #2c2c2e;
+  --surface-subtle: rgba(255,255,255,0.028);
+  --surface-hover: rgba(255,255,255,0.050);
+  --surface-active: rgba(255,255,255,0.085);
 
   /* Divider / separator */
-  --divider: rgba(255,255,255,0.07);
+  --divider: rgba(255,255,255,0.075);
 
   /* Text tokens */
-  --text-primary: rgba(237,232,235,0.92);
-  --text-secondary: rgba(237,232,235,0.55);
-  --text-tertiary: rgba(237,232,235,0.38);
-  --text-faint: rgba(237,232,235,0.25);
-  --text-placeholder: rgba(237,232,235,0.28);
+  --text-primary: rgba(232,228,232,0.92);
+  --text-secondary: rgba(232,228,232,0.55);
+  --text-tertiary: rgba(232,228,232,0.38);
+  --text-faint: rgba(232,228,232,0.24);
+  --text-placeholder: rgba(232,228,232,0.28);
 
   color-scheme: dark;
 }
@@ -104,6 +141,116 @@ body {
     Arial, "Apple Color Emoji", "Segoe UI Emoji";
 }
 
+/* ── Light mode scrollbars ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.22); }
+
+/* ── Semantic utility classes ── */
+
+/* Card surfaces */
+.ui-card {
+  background: var(--surface-base);
+  border: 1px solid var(--divider);
+  border-radius: 16px;
+  box-shadow: var(--shadow-xs);
+}
+.ui-card-raised {
+  background: var(--surface-raised);
+  border: 1px solid var(--divider);
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Section eyebrow label */
+.ui-eyebrow {
+  font-size: var(--font-2xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* Pill badge */
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+}
+
+/* Button base */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-sm);
+  font-weight: 700;
+  letter-spacing: var(--tracking-snug);
+  border-radius: 10px;
+  padding: 8px 16px;
+  transition: all 150ms ease;
+  cursor: pointer;
+  border: none;
+}
+.ui-btn-primary {
+  background: var(--lifeos-pink);
+  color: #fff;
+  box-shadow: var(--shadow-accent);
+}
+.ui-btn-primary:hover { box-shadow: var(--shadow-accent-hover); transform: translateY(-1px); }
+.ui-btn-primary:active { transform: scale(0.97); box-shadow: var(--shadow-accent); }
+.ui-btn-primary:disabled { opacity: 0.35; box-shadow: none; transform: none; }
+.ui-btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--divider);
+}
+.ui-btn-ghost:hover { background: var(--surface-hover); color: var(--text-primary); }
+
+/* Settings row */
+.ui-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px;
+  transition: background 150ms ease;
+}
+.ui-settings-row:hover { background: var(--surface-hover); }
+
+/* Settings icon container */
+.ui-settings-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+/* Input base */
+.ui-input {
+  background: var(--surface-base);
+  border: 1px solid var(--divider);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: var(--font-sm);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+  width: 100%;
+}
+.ui-input:focus {
+  border-color: var(--lifeos-pink);
+  box-shadow: 0 0 0 3px rgba(var(--lifeos-pink-rgb), 0.12);
+}
+
 /* ══════════════════════════════════════════════════════
    DARK MODE OVERRIDES
    All surfaces, cards, inputs, borders & text
@@ -111,27 +258,24 @@ body {
 
 /* ── Backgrounds: solid white surfaces ── */
 html.dark .bg-white {
-  background-color: #201b1e !important;
+  background-color: #1c1c1e !important;
 }
 
 /* ── Backgrounds: semi-transparent white — keep transparency but darken base ── */
-/* Tailwind v4 generates bg-white/70 as rgba(var(--color-white)/0.7) so the
-   --color-white: #201b1e override handles these automatically. We just ensure
-   any elements that hardcode bg-white get the full dark surface. */
 html.dark [class*="bg-white"] {
-  background-color: #201b1e !important;
+  background-color: #1c1c1e !important;
 }
 
 /* ── Semi-transparent variants: preserve the opacity ── */
 html.dark .bg-white\/70,
-html.dark [class="bg-white/70"] { background-color: rgba(32, 27, 30, 0.8) !important; }
+html.dark [class="bg-white/70"] { background-color: rgba(28, 28, 30, 0.82) !important; }
 html.dark .bg-white\/80,
-html.dark [class="bg-white/80"] { background-color: rgba(32, 27, 30, 0.88) !important; }
+html.dark [class="bg-white/80"] { background-color: rgba(28, 28, 30, 0.88) !important; }
 html.dark .bg-white\/90,
-html.dark [class="bg-white/90"] { background-color: rgba(32, 27, 30, 0.92) !important; }
-html.dark .bg-white\/20 { background-color: rgba(237, 232, 235, 0.12) !important; }
-html.dark .bg-white\/30 { background-color: rgba(237, 232, 235, 0.14) !important; }
-html.dark .bg-white\/50 { background-color: rgba(237, 232, 235, 0.1) !important; }
+html.dark [class="bg-white/90"] { background-color: rgba(28, 28, 30, 0.92) !important; }
+html.dark .bg-white\/20 { background-color: rgba(232, 228, 232, 0.10) !important; }
+html.dark .bg-white\/30 { background-color: rgba(232, 228, 232, 0.12) !important; }
+html.dark .bg-white\/50 { background-color: rgba(232, 228, 232, 0.08) !important; }
 
 /* ── backdrop-blur glassmorphism panels ── */
 html.dark .backdrop-blur-sm,
@@ -142,17 +286,17 @@ html.dark .backdrop-blur {
 /* ── Cards (rounded-2xl, rounded-3xl) — flip background when no explicit color ── */
 html.dark .rounded-3xl:not([class*="bg-"]),
 html.dark .rounded-t-3xl:not([class*="bg-"]) {
-  background-color: #201b1e;
+  background-color: #1c1c1e;
 }
 
 html.dark .rounded-2xl:not([class*="bg-"]) {
-  background-color: #201b1e;
+  background-color: #1c1c1e;
 }
 
 /* ── Explicitly white-bg cards/modals ── */
 html.dark .rounded-2xl.bg-white,
 html.dark .rounded-3xl.bg-white {
-  background-color: #201b1e !important;
+  background-color: #1c1c1e !important;
 }
 
 /* ── Preserve intentional coloured chip/badge backgrounds ── */
@@ -199,14 +343,14 @@ html.dark input[type="number"],
 html.dark input[type="email"],
 html.dark input[type="search"],
 html.dark select {
-  background-color: #201b1e !important;
-  color: #ede8eb !important;
-  border-color: rgba(237, 232, 235, 0.13) !important;
+  background-color: #1c1c1e !important;
+  color: #e8e4e8 !important;
+  border-color: rgba(232, 228, 232, 0.12) !important;
 }
 
 html.dark textarea::placeholder,
 html.dark input::placeholder {
-  color: rgba(237, 232, 235, 0.28) !important;
+  color: rgba(232, 228, 232, 0.28) !important;
 }
 
 /* ── Borders: subtle black borders → subtle white borders ── */

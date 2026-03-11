@@ -100,15 +100,15 @@ function WeekRhythm({ last7 }: { last7: { date: string; completion: number }[] }
         const pct = Math.max(d.completion * 100, d.completion > 0 ? 8 : 0);
         return (
           <div key={i} className="flex-1 flex flex-col items-center gap-1">
-            <div className="w-full relative rounded-full overflow-hidden bg-black/[0.06]" style={{ height: 28 }}>
+            <div className="w-full relative rounded-md overflow-hidden" style={{ height: 28, background: "var(--surface-subtle)" }}>
               <motion.div
-                className={`absolute bottom-0 w-full rounded-full ${isToday ? "bg-[var(--lifeos-pink)]" : "bg-black/20"}`}
+                className={`absolute bottom-0 w-full rounded-md ${isToday ? "bg-[var(--lifeos-pink)]" : "bg-black/[0.18]"}`}
                 initial={{ height: 0 }}
                 animate={{ height: `${pct}%` }}
                 transition={{ delay: i * 0.04, type: "spring", stiffness: 300, damping: 28 }}
               />
             </div>
-            <span className={`text-[9px] font-bold ${isToday ? "text-[var(--lifeos-pink)]" : "text-black/25"}`}>
+            <span className={`text-[9px] font-bold uppercase tracking-wide ${isToday ? "text-[var(--lifeos-pink)]" : "text-[var(--text-faint)]"}`}>
               {days[(new Date(d.date + "T12:00:00")).getDay()]}
             </span>
           </div>
@@ -145,11 +145,16 @@ function TodayBlockRow({
       animate={{ opacity: 1, x: 0 }}
       className={`relative flex items-center gap-3 rounded-2xl px-4 py-3 border transition-all ${
         isNow
-          ? "border-[var(--lifeos-pink)]/30 bg-[var(--lifeos-pink)]/5 shadow-sm"
+          ? "border-[var(--lifeos-pink)]/25"
           : isPast
-          ? "border-black/[0.04] bg-black/[0.02] opacity-60"
-          : "border-black/[0.06] bg-white"
-      } ${done ? "opacity-40" : ""}`}
+          ? "opacity-55"
+          : ""
+      } ${done ? "opacity-35" : ""}`}
+      style={{
+        borderColor: isNow ? "rgba(var(--lifeos-pink-rgb),0.25)" : "var(--divider)",
+        background: isNow ? "rgba(var(--lifeos-pink-rgb),0.04)" : isPast ? "var(--surface-subtle)" : "var(--surface-raised)",
+        boxShadow: isNow ? "none" : isPast ? "none" : "var(--shadow-xs)",
+      }}
     >
       {/* Checkbox */}
       <button
@@ -158,8 +163,8 @@ function TodayBlockRow({
           done
             ? "bg-emerald-400 border-emerald-400"
             : isNow
-            ? "border-[var(--lifeos-pink)] hover:bg-[var(--lifeos-pink)]/10"
-            : "border-black/20 hover:border-black/40"
+            ? "border-[var(--lifeos-pink)]"
+            : "border-black/[0.18] hover:border-black/[0.35]"
         }`}
         aria-label={done ? "Mark incomplete" : "Mark complete"}
       >
@@ -171,13 +176,13 @@ function TodayBlockRow({
       </button>
 
       {/* Time */}
-      <div className="text-[11px] font-bold tabular-nums text-black/35 w-[52px] shrink-0 leading-tight">
+      <div className="text-[11px] font-bold tabular-nums w-[52px] shrink-0 leading-tight" style={{ color: "var(--text-faint)" }}>
         {minsToTime(block.startMin)}
       </div>
 
       {/* Title + kind */}
       <div className="flex-1 min-w-0">
-        <div className={`text-sm font-semibold truncate ${done ? "line-through text-black/40" : "text-black/80"}`}>
+        <div className={`text-sm font-semibold truncate ${done ? "line-through" : ""}`} style={{ color: done ? "var(--text-faint)" : "var(--text-secondary)" }}>
           {block.title}
         </div>
         {block.meta?.kind && (
@@ -195,7 +200,7 @@ function TodayBlockRow({
           </span>
         )}
         <div className={`h-2 w-2 rounded-full ${dot}`} />
-        <span className="text-[10px] text-black/30 font-medium tabular-nums">{durLabel}</span>
+        <span className="text-[10px] font-medium tabular-nums" style={{ color: "var(--text-faint)" }}>{durLabel}</span>
       </div>
     </motion.div>
   );
@@ -365,16 +370,16 @@ export default function PlanPage() {
     <div className="space-y-6 max-w-3xl mx-auto">
 
       {/* ── Hero header ───────────────────────────────────────────── */}
-      <div className="rounded-3xl border border-black/[0.06] bg-white px-6 py-5 flex items-center justify-between gap-4">
+      <div className="ui-card-raised px-6 py-5 flex items-center justify-between gap-4">
         <div>
-          <div className="text-[11px] font-bold uppercase tracking-widest text-black/35 mb-1">{dateLabel}</div>
-          <div className="text-2xl font-extrabold text-black" style={{ letterSpacing: "-0.025em" }}>
+          <div className="ui-eyebrow mb-0.5">{dateLabel}</div>
+          <div className="text-[22px] font-extrabold text-[var(--text-primary)]" style={{ letterSpacing: "-0.025em", lineHeight: 1.2 }}>
             {greeting} ✦
           </div>
           {/* Mini progress */}
           {todayTotal > 0 ? (
-            <div className="mt-2 flex items-center gap-2">
-              <div className="flex-1 h-1.5 rounded-full bg-black/[0.07] overflow-hidden max-w-[120px]">
+            <div className="mt-2.5 flex items-center gap-2">
+              <div className="flex-1 h-1.5 rounded-full overflow-hidden max-w-[120px]" style={{ background: "var(--surface-subtle)" }}>
                 <motion.div
                   className="h-full rounded-full bg-[var(--lifeos-pink)]"
                   initial={{ width: 0 }}
@@ -382,12 +387,12 @@ export default function PlanPage() {
                   transition={{ type: "spring", stiffness: 200, damping: 25 }}
                 />
               </div>
-              <span className="text-xs font-semibold text-black/45">
+              <span className="text-xs font-semibold text-[var(--text-muted)]">
                 {todayDone}/{todayTotal} done today
               </span>
             </div>
           ) : (
-            <p className="mt-1.5 text-xs text-black/40">No blocks scheduled today yet.</p>
+            <p className="mt-1.5 text-xs text-[var(--text-faint)]">No blocks scheduled today yet.</p>
           )}
         </div>
 
@@ -395,13 +400,15 @@ export default function PlanPage() {
         <div className="flex flex-col gap-2 shrink-0">
           <button
             onClick={() => router.push("/")}
-            className="flex items-center gap-2 rounded-xl bg-[var(--lifeos-pink)] px-4 py-2.5 text-xs font-bold text-white shadow-[0_2px_8px_rgba(217,108,125,0.3)] hover:shadow-[0_4px_14px_rgba(217,108,125,0.4)] hover:scale-[1.03] active:scale-[0.97] transition-all"
+            className="flex items-center gap-2 rounded-xl bg-[var(--lifeos-pink)] px-4 py-2.5 text-xs font-bold text-white hover:scale-[1.03] active:scale-[0.97] transition-all"
+            style={{ boxShadow: "var(--shadow-accent)" }}
           >
             <span>✦</span> New plan
           </button>
           <button
             onClick={() => router.push("/calendar")}
-            className="flex items-center gap-2 rounded-xl border border-black/[0.08] bg-white px-4 py-2.5 text-xs font-semibold text-black/60 hover:bg-black/[0.03] hover:scale-[1.02] active:scale-[0.97] transition-all"
+            className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold text-[var(--text-muted)] hover:scale-[1.02] active:scale-[0.97] transition-all"
+            style={{ background: "var(--surface-base)", border: "1px solid var(--divider)" }}
           >
             <span>📅</span> Calendar
           </button>
@@ -411,56 +418,57 @@ export default function PlanPage() {
       {/* ── 7-day rhythm + stats row ──────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {/* Activity bars */}
-        <div className="col-span-2 rounded-2xl border border-black/[0.06] bg-white px-4 py-3.5">
-          <div className="text-[10px] font-bold uppercase tracking-widest text-black/30 mb-2">Activity — last 7 days</div>
+        <div className="col-span-2 ui-card px-4 py-3.5">
+          <div className="ui-eyebrow mb-2">Activity — last 7 days</div>
           {profile.last7.length > 0 ? (
             <WeekRhythm last7={profile.last7} />
           ) : (
             <div className="h-10 flex items-center">
-              <span className="text-xs text-black/30">No data yet</span>
+              <span className="text-xs text-[var(--text-faint)]">No data yet</span>
             </div>
           )}
         </div>
 
         {/* Stat: This week */}
-        <div className="rounded-2xl border border-black/[0.06] bg-white px-4 py-3.5 flex flex-col justify-between">
-          <div className="text-[10px] font-bold uppercase tracking-widest text-black/30">This week</div>
+        <div className="ui-card px-4 py-3.5 flex flex-col justify-between">
+          <div className="ui-eyebrow">This week</div>
           <div>
-            <div className="text-3xl font-extrabold text-black mt-1" style={{ letterSpacing: "-0.03em" }}>
+            <div className="text-[28px] font-extrabold text-[var(--text-primary)] mt-1" style={{ letterSpacing: "-0.03em", lineHeight: 1 }}>
               {next7.length}
             </div>
-            <div className="text-[11px] text-black/40 font-medium">events ahead</div>
+            <div className="text-[11px] text-[var(--text-faint)] font-medium mt-0.5">events ahead</div>
           </div>
         </div>
 
         {/* Stat: Deadlines */}
-        <div className="rounded-2xl border border-black/[0.06] bg-white px-4 py-3.5 flex flex-col justify-between">
-          <div className="text-[10px] font-bold uppercase tracking-widest text-black/30">Deadlines</div>
+        <div className="ui-card px-4 py-3.5 flex flex-col justify-between">
+          <div className="ui-eyebrow">Deadlines</div>
           <div>
             <div
-              className="text-3xl font-extrabold mt-1"
-              style={{ letterSpacing: "-0.03em", color: upcomingDeadlines.length > 0 ? "var(--lifeos-pink)" : "var(--lifeos-ink)" }}
+              className="text-[28px] font-extrabold mt-1"
+              style={{ letterSpacing: "-0.03em", lineHeight: 1, color: upcomingDeadlines.length > 0 ? "var(--lifeos-pink)" : "var(--text-primary)" }}
             >
               {upcomingDeadlines.length}
             </div>
-            <div className="text-[11px] text-black/40 font-medium">next 45 days</div>
+            <div className="text-[11px] text-[var(--text-faint)] font-medium mt-0.5">next 45 days</div>
           </div>
         </div>
       </div>
 
       {/* ── Section toggle ────────────────────────────────────────── */}
-      <div className="flex gap-2">
+      <div className="flex gap-1.5">
         {(["today", "upcoming"] as const).map((s) => (
           <button
             key={s}
             onClick={() => setSection(s)}
-            className={`px-5 py-2 rounded-full text-sm font-bold transition-all ${
+            className={`px-4 py-1.5 rounded-full text-sm font-bold transition-all ${
               section === s
-                ? "bg-[var(--lifeos-pink)] text-white shadow-[0_2px_8px_rgba(217,108,125,0.3)]"
-                : "bg-black/[0.05] text-black/50 hover:bg-black/[0.08] hover:text-black/70"
+                ? "bg-[var(--lifeos-pink)] text-white"
+                : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             }`}
+            style={section === s ? { boxShadow: "var(--shadow-accent)" } : { background: "var(--surface-subtle)" }}
           >
-            {s === "today" ? `Today  ${todayTotal > 0 ? `(${todayTotal})` : ""}` : `Upcoming  ${upcomingDeadlines.length > 0 ? `(${upcomingDeadlines.length})` : ""}`}
+            {s === "today" ? `Today${todayTotal > 0 ? ` (${todayTotal})` : ""}` : `Upcoming${upcomingDeadlines.length > 0 ? ` (${upcomingDeadlines.length})` : ""}`}
           </button>
         ))}
       </div>
@@ -570,11 +578,11 @@ export default function PlanPage() {
 
             {/* AI coach note */}
             {coachNote && (
-              <div className="rounded-2xl border border-[var(--lifeos-pink)]/15 bg-[var(--lifeos-pink)]/5 px-5 py-4">
-                <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--lifeos-pink)]/60 mb-1.5">
+              <div className="rounded-2xl border px-5 py-4" style={{ borderColor: "rgba(var(--lifeos-pink-rgb),0.15)", background: "rgba(var(--lifeos-pink-rgb),0.04)" }}>
+                <div className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: "rgba(var(--lifeos-pink-rgb),0.55)" }}>
                   ✦ AI Coach
                 </div>
-                <p className="text-sm font-medium text-black/70 leading-relaxed italic">
+                <p className="text-sm font-medium leading-relaxed italic" style={{ color: "var(--text-muted)" }}>
                   &ldquo;{coachNote}&rdquo;
                 </p>
               </div>
@@ -582,18 +590,16 @@ export default function PlanPage() {
 
             {/* Focus priorities from latest plan */}
             {latestPlan?.priorities && latestPlan.priorities.length > 0 && (
-              <div className="rounded-2xl border border-black/[0.06] bg-white px-5 py-4">
+              <div className="ui-card px-5 py-4">
                 <div className="flex items-center justify-between mb-3">
-                  <div className="text-[11px] font-bold uppercase tracking-widest text-black/35">
-                    Priorities
-                  </div>
-                  <span className="text-[10px] bg-black/[0.04] text-black/35 font-bold rounded-full px-2 py-0.5">
+                  <div className="ui-eyebrow">Priorities</div>
+                  <span className="text-[10px] font-bold rounded-full px-2 py-0.5" style={{ background: "var(--surface-subtle)", color: "var(--text-faint)" }}>
                     from last plan
                   </span>
                 </div>
                 <ul className="space-y-2">
                   {latestPlan.priorities.slice(0, 4).map((p, i) => (
-                    <li key={i} className="flex items-start gap-2.5 text-sm text-black/70">
+                    <li key={i} className="flex items-start gap-2.5 text-sm" style={{ color: "var(--text-muted)" }}>
                       <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--lifeos-pink)]" />
                       {p}
                     </li>
@@ -618,9 +624,9 @@ export default function PlanPage() {
           >
 
             {/* Deadlines list */}
-            <div className="rounded-2xl border border-black/[0.06] bg-white overflow-hidden">
-              <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-black/[0.04]">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-black/35">
+            <div className="ui-card overflow-hidden">
+              <div className="flex items-center justify-between px-5 pt-4 pb-3" style={{ borderBottom: "1px solid var(--divider)" }}>
+                <div className="ui-eyebrow">
                   Deadlines &amp; exams — next 45 days
                 </div>
                 <button
@@ -656,11 +662,9 @@ export default function PlanPage() {
 
             {/* Next 7 days schedule (non-deadline events) */}
             {next7.length > 0 && (
-              <div className="rounded-2xl border border-black/[0.06] bg-white overflow-hidden">
-                <div className="px-5 pt-4 pb-3 border-b border-black/[0.04]">
-                  <div className="text-[11px] font-bold uppercase tracking-widest text-black/35">
-                    This week&apos;s schedule
-                  </div>
+              <div className="ui-card overflow-hidden">
+                <div className="px-5 pt-4 pb-3" style={{ borderBottom: "1px solid var(--divider)" }}>
+                  <div className="ui-eyebrow">This week&apos;s schedule</div>
                 </div>
                 <div className="px-5 py-2">
                   {/* Group by date */}
@@ -671,10 +675,8 @@ export default function PlanPage() {
                       grouped.get(b.date)!.push(b);
                     }
                     return Array.from(grouped.entries()).map(([date, blocks]) => (
-                      <div key={date} className="py-2.5 border-b border-black/[0.03] last:border-0">
-                        <div className="text-[10px] font-extrabold uppercase tracking-widest text-black/30 mb-2">
-                          {isoToShortDate(date)}
-                        </div>
+                      <div key={date} className="py-2.5 last:border-0" style={{ borderBottom: "1px solid var(--divider)" }}>
+                        <div className="ui-eyebrow mb-2">{isoToShortDate(date)}</div>
                         <div className="space-y-1.5">
                           {blocks.slice(0, 5).map((b) => {
                             const { dot } = kindColor(b.meta?.kind);
@@ -685,15 +687,15 @@ export default function PlanPage() {
                                   className={`h-2 w-2 rounded-full flex-shrink-0 ${blockColor ? "" : dot}`}
                                   style={blockColor ? { backgroundColor: blockColor } : undefined}
                                 />
-                                <span className="flex-1 text-black/70 font-medium truncate">{b.title}</span>
-                                <span className="text-[11px] text-black/30 tabular-nums shrink-0">
+                                <span className="flex-1 font-medium truncate" style={{ color: "var(--text-muted)" }}>{b.title}</span>
+                                <span className="text-[11px] tabular-nums shrink-0" style={{ color: "var(--text-faint)" }}>
                                   {minsToTime(b.startMin)}
                                 </span>
                               </div>
                             );
                           })}
                           {blocks.length > 5 && (
-                            <div className="text-[11px] text-black/30 font-medium pl-4.5">
+                            <div className="text-[11px] font-medium pl-4.5" style={{ color: "var(--text-faint)" }}>
                               +{blocks.length - 5} more
                             </div>
                           )}

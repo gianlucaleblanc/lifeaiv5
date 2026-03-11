@@ -1473,28 +1473,29 @@ function SuggestionInlineCards({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 6, scale: 0.97 }}
       transition={{ duration: 0.2, ease: "easeOut" }}
-      className="mt-3 rounded-2xl overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.07)] border border-black/[0.07]"
+      className="mt-3 rounded-2xl overflow-hidden"
+      style={{ boxShadow: "var(--shadow-md)", border: "1px solid var(--divider)" }}
     >
       <div className="h-0.5 w-full bg-gradient-to-r from-[var(--lifeos-pink)] via-[var(--lifeos-pink)]/50 to-transparent" />
-      <div className="bg-white dark:bg-zinc-900 px-4 pt-3.5 pb-3.5 space-y-2">
+      <div className="px-4 pt-3.5 pb-3.5 space-y-2" style={{ background: "var(--surface-raised)" }}>
         {/* Header */}
         <div className="flex items-center justify-between mb-0.5">
           <div className="flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--lifeos-pink)]" />
             <p className="text-[10px] font-bold text-[var(--lifeos-pink)] uppercase tracking-widest">Prep tips</p>
           </div>
-          <button onClick={onDismiss} className="text-black/25 dark:text-white/25 hover:text-black/50 dark:hover:text-white/50 transition-colors text-xs" aria-label="Dismiss">✕</button>
+          <button onClick={onDismiss} className="transition-colors text-xs" style={{ color: "var(--text-faint)" }} aria-label="Dismiss">✕</button>
         </div>
 
         {/* Cards */}
         {suggestions.map((s, i) => (
-          <div key={`${s.date}-${s.title}-${i}`} className="flex items-start gap-3 rounded-xl border border-black/[0.06] dark:border-white/[0.06] bg-black/[0.015] dark:bg-white/[0.03] px-3 py-2.5">
+          <div key={`${s.date}-${s.title}-${i}`} className="flex items-start gap-3 rounded-xl px-3 py-2.5" style={{ border: "1px solid var(--divider)", background: "var(--surface-subtle)" }}>
             <div className="flex-1 min-w-0">
-              <div className="font-semibold text-sm text-black/85 dark:text-white/85 leading-snug">{s.title}</div>
-              <div className="text-xs text-black/40 dark:text-white/40 mt-0.5">
+              <div className="font-semibold text-sm leading-snug" style={{ color: "var(--text-secondary)" }}>{s.title}</div>
+              <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
                 {friendlyDate(s.date)} · {minutesToTime(s.startMin)}–{minutesToTime(s.endMin)}
               </div>
-              {s.reason && <div className="text-xs text-black/30 dark:text-white/30 mt-0.5 italic">{s.reason}</div>}
+              {s.reason && <div className="text-xs mt-0.5 italic" style={{ color: "var(--text-faint)" }}>{s.reason}</div>}
             </div>
             <button
               onClick={() => handleAdd(s, i)}
@@ -1503,8 +1504,9 @@ function SuggestionInlineCards({
                 "shrink-0 mt-0.5 flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold transition-all",
                 added.has(i)
                   ? "bg-emerald-100 text-emerald-600 border border-emerald-200 cursor-default"
-                  : "bg-[var(--lifeos-pink)] text-white shadow-[0_2px_8px_rgba(217,108,125,0.3)] hover:scale-110 active:scale-95",
+                  : "bg-[var(--lifeos-pink)] text-white hover:scale-110 active:scale-95",
               ].join(" ")}
+              style={!added.has(i) ? { boxShadow: "var(--shadow-accent)" } : undefined}
               aria-label={added.has(i) ? "Added" : "Add to calendar"}
             >
               {added.has(i) ? "✓" : "+"}
@@ -1513,11 +1515,11 @@ function SuggestionInlineCards({
         ))}
 
         {/* Save preference row */}
-        <div className="flex items-center gap-2 pt-1.5 border-t border-black/[0.05] dark:border-white/[0.05]">
-          <p className="text-xs text-black/35 dark:text-white/35 flex-1">Always suggest for {label}?</p>
+        <div className="flex items-center gap-2 pt-1.5" style={{ borderTop: "1px solid var(--divider)" }}>
+          <p className="text-xs flex-1" style={{ color: "var(--text-faint)" }}>Always suggest for {label}?</p>
           <button onClick={() => { onSavePref(eventContext, true); onDismiss(); }} className="text-xs font-bold text-[var(--lifeos-pink)] hover:underline transition-colors">Save</button>
-          <span className="text-black/15 dark:text-white/15 text-xs">·</span>
-          <button onClick={() => { onSavePref(eventContext, false); onDismiss(); }} className="text-xs font-semibold text-black/30 dark:text-white/30 hover:text-black/60 dark:hover:text-white/60 transition-colors">Never</button>
+          <span className="text-xs" style={{ color: "var(--divider)" }}>·</span>
+          <button onClick={() => { onSavePref(eventContext, false); onDismiss(); }} className="text-xs font-semibold transition-colors" style={{ color: "var(--text-faint)" }}>Never</button>
         </div>
       </div>
     </motion.div>
@@ -1547,18 +1549,18 @@ function MissingInfoModal({ open, onClose, onPickNext, onPickExact, eventTitle, 
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4">
-      <div className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl bg-white shadow-[0_24px_64px_rgba(0,0,0,0.18)] overflow-hidden">
+      <div className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl overflow-hidden" style={{ background: "var(--surface-raised)", boxShadow: "var(--shadow-xl)" }}>
 
         {/* Header */}
         <div className="px-6 pt-6 pb-5">
           {/* Multi-event progress */}
           {isMulti && totalEvents && totalEvents > 1 && (
             <div className="mb-4">
-              <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-black/30 mb-2">
+              <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: "var(--text-faint)" }}>
                 <span>Scheduling {totalEvents} events</span>
                 <span>{totalEvents - queueInfo.remaining} / {totalEvents}</span>
               </div>
-              <div className="h-1 rounded-full bg-black/[0.06] overflow-hidden">
+              <div className="h-1 rounded-full overflow-hidden" style={{ background: "var(--surface-subtle)" }}>
                 <div
                   className="h-full rounded-full bg-[var(--lifeos-pink)] transition-all duration-500"
                   style={{ width: `${((totalEvents - queueInfo.remaining) / totalEvents) * 100}%` }}
@@ -1569,16 +1571,16 @@ function MissingInfoModal({ open, onClose, onPickNext, onPickExact, eventTitle, 
 
           {/* Event name pill */}
           {eventTitle && (
-            <div className="inline-flex items-center gap-1.5 rounded-full bg-[var(--lifeos-pink)]/8 border border-[var(--lifeos-pink)]/15 px-3 py-1 mb-3">
+            <div className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 mb-3" style={{ background: "rgba(var(--lifeos-pink-rgb),0.08)", border: "1px solid rgba(var(--lifeos-pink-rgb),0.15)" }}>
               <span className="h-1.5 w-1.5 rounded-full bg-[var(--lifeos-pink)]" />
               <span className="text-xs font-bold text-[var(--lifeos-pink)]">{eventTitle}</span>
             </div>
           )}
 
-          <h2 className="text-[22px] font-extrabold text-black leading-tight" style={{ letterSpacing: "-0.03em" }}>
+          <h2 className="text-[22px] font-extrabold leading-tight text-[var(--text-primary)]" style={{ letterSpacing: "-0.03em" }}>
             {hideNextAvailable ? "Pick a time" : "When is this?"}
           </h2>
-          <p className="mt-1 text-sm text-black/40 font-medium">
+          <p className="mt-1 text-sm font-medium" style={{ color: "var(--text-muted)" }}>
             {isMulti && queueInfo.remaining > 0
               ? `${queueInfo.remaining} more to go after this.`
               : hideNextAvailable
@@ -2006,17 +2008,17 @@ function SettingsModal({
 
   return (
     <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4">
-      <div className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl bg-white shadow-[0_24px_64px_rgba(0,0,0,0.18)] overflow-hidden flex flex-col max-h-[92vh]">
+      <div className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl overflow-hidden flex flex-col max-h-[92vh]" style={{ background: "var(--surface-raised)", boxShadow: "var(--shadow-xl)" }}>
 
         {/* Header */}
-        <div className="px-6 pt-6 pb-4 flex-shrink-0 flex items-center justify-between border-b border-black/[0.06]">
+        <div className="px-6 pt-6 pb-4 flex-shrink-0 flex items-center justify-between" style={{ borderBottom: "1px solid var(--divider)" }}>
           <div>
-            <h2 className="text-[20px] font-extrabold text-black leading-tight" style={{ letterSpacing: "-0.03em" }}>
+            <h2 className="text-[20px] font-extrabold leading-tight text-[var(--text-primary)]" style={{ letterSpacing: "-0.03em" }}>
               Preferences
             </h2>
-            <p className="text-xs text-black/40 mt-0.5">Update your profile &amp; schedule defaults</p>
+            <p className="text-xs mt-0.5" style={{ color: "var(--text-faint)" }}>Update your profile &amp; schedule defaults</p>
           </div>
-          <button onClick={onClose} className="h-8 w-8 rounded-xl flex items-center justify-center text-black/30 hover:text-black/60 hover:bg-black/[0.05] transition-all">
+          <button onClick={onClose} className="h-8 w-8 rounded-xl flex items-center justify-center transition-all" style={{ color: "var(--text-faint)" }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
               <path d="M18 6L6 18M6 6l12 12" />
             </svg>
@@ -2149,11 +2151,12 @@ function SettingsModal({
         </div>
 
         {/* Footer */}
-        <div className="px-6 pt-3 pb-6 flex-shrink-0 border-t border-black/[0.05]">
+        <div className="px-6 pt-3 pb-6 flex-shrink-0" style={{ borderTop: "1px solid var(--divider)" }}>
           <button
             onClick={handleSave}
             disabled={saved}
-            className="w-full rounded-2xl bg-[var(--lifeos-pink)] px-5 py-3.5 text-base font-bold text-white shadow-[0_4px_20px_rgba(217,108,125,0.3)] hover:shadow-[0_6px_28px_rgba(217,108,125,0.4)] hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-60"
+            className="w-full rounded-2xl px-5 py-3.5 text-base font-bold text-white hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-60 bg-[var(--lifeos-pink)]"
+            style={{ boxShadow: "var(--shadow-accent)" }}
           >
             {saved ? "Saved ✓" : "Save preferences"}
           </button>
@@ -2449,8 +2452,8 @@ function WeekMiniStrip() {
 
   return (
     <div className="mt-4 w-full max-w-2xl">
-      <a href="/calendar" className="block rounded-2xl border border-[var(--lifeos-border-soft)] bg-white/70 px-4 py-3 backdrop-blur-sm hover:shadow-md transition-shadow">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-black/30 mb-2.5">This week</div>
+      <a href="/calendar" className="block rounded-2xl px-4 py-3 hover:shadow-[var(--shadow-sm)] transition-shadow" style={{ border: "1px solid var(--divider)", background: "var(--surface-raised)" }}>
+        <div className="ui-eyebrow mb-2.5">This week</div>
         <div className="flex justify-between gap-1">
           {dayNames.map((d, i) => {
             const isToday = dateLabels[i] === todayISO;
@@ -2458,13 +2461,14 @@ function WeekMiniStrip() {
             return (
               <div key={i} className="flex flex-col items-center gap-1 flex-1">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all
-                  ${isToday && hasBlocks ? "bg-[var(--lifeos-pink)] text-white shadow-[0_2px_8px_rgba(217,108,125,0.4)]" :
+                  ${isToday && hasBlocks ? "bg-[var(--lifeos-pink)] text-white" :
                     isToday ? "border-2 border-[var(--lifeos-pink)] text-[var(--lifeos-pink)]" :
-                    hasBlocks ? "bg-[var(--lifeos-pink)]/15 text-[var(--lifeos-pink)]" :
-                    "text-black/20"}`}>
+                    hasBlocks ? "text-[var(--lifeos-pink)]" :
+                    "text-[var(--text-faint)]"}`}
+                  style={isToday && hasBlocks ? { boxShadow: "var(--shadow-accent)" } : hasBlocks ? { background: "rgba(var(--lifeos-pink-rgb),0.1)" } : undefined}>
                   {hasBlocks ? counts[i] : "·"}
                 </div>
-                <span className={`text-[9px] font-bold ${isToday ? "text-[var(--lifeos-pink)]" : "text-black/25"}`}>{d}</span>
+                <span className={`text-[9px] font-bold ${isToday ? "text-[var(--lifeos-pink)]" : "text-[var(--text-faint)]"}`}>{d}</span>
               </div>
             );
           })}
@@ -2514,9 +2518,9 @@ function TodayStrip() {
 
   return (
     <div className="mt-6 w-full max-w-2xl">
-      <div className="rounded-2xl border border-[var(--lifeos-border-soft)] bg-white/70 px-4 py-3 backdrop-blur-sm">
+      <div className="ui-card px-4 py-3">
         <div className="flex items-center justify-between mb-2.5">
-          <span className="text-xs font-bold uppercase tracking-wider text-black/40">
+          <span className="ui-eyebrow">
             {onboardingName ? `Today, ${onboardingName}` : "Today"}
           </span>
           <a href="/calendar" className="text-[11px] font-semibold text-[var(--lifeos-pink)] hover:underline">
@@ -2524,7 +2528,7 @@ function TodayStrip() {
           </a>
         </div>
         {blocks.length === 0 ? (
-          <p className="text-xs text-black/30 italic">Nothing scheduled for today — add something above.</p>
+          <p className="text-xs italic" style={{ color: "var(--text-faint)" }}>Nothing scheduled for today — add something above.</p>
         ) : (
           <div className="flex flex-col gap-1.5">
             {blocks.map((b) => (
@@ -2533,8 +2537,8 @@ function TodayStrip() {
                   className="h-2 w-2 shrink-0 rounded-full"
                   style={{ backgroundColor: (b.meta as any)?.color ?? kindColor[b.meta?.kind ?? "manual"] ?? "#d96c7d" }}
                 />
-                <span className="flex-1 truncate text-sm font-semibold text-black/80">{b.title}</span>
-                <span className="shrink-0 text-xs text-black/40">{minToTime(b.startMin)}</span>
+                <span className="flex-1 truncate text-sm font-semibold" style={{ color: "var(--text-secondary)" }}>{b.title}</span>
+                <span className="shrink-0 text-xs" style={{ color: "var(--text-faint)" }}>{minToTime(b.startMin)}</span>
               </div>
             ))}
           </div>
@@ -2579,32 +2583,30 @@ function SidebarTodayPanel() {
   }
 
   return (
-    <div className="rounded-2xl border border-[var(--lifeos-border-soft)] bg-white/80 backdrop-blur-sm overflow-hidden">
+    <div className="ui-card overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-black/[0.05]">
+      <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid var(--divider)" }}>
         <div className="flex items-center gap-2">
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--lifeos-pink)]" />
-          <span className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-black/50">
-            {name ? `Today, ${name}` : "Today"}
-          </span>
+          <span className="ui-eyebrow">{name ? `Today, ${name}` : "Today"}</span>
         </div>
         <a href="/calendar" className="text-[11px] font-semibold text-[var(--lifeos-pink)] hover:underline">
           View all →
         </a>
       </div>
       {/* Body */}
-      <div className="px-3 py-2.5 space-y-1">
+      <div className="px-3 py-2.5 space-y-0.5">
         {blocks.length === 0 ? (
-          <p className="text-[12px] text-black/30 italic px-1 py-1">Nothing scheduled yet — add something from the input.</p>
+          <p className="text-[12px] italic px-1 py-1" style={{ color: "var(--text-faint)" }}>Nothing scheduled yet — add something from the input.</p>
         ) : (
           blocks.map((b) => {
             const color = (b.meta as any)?.color ?? kindColor[b.meta?.kind ?? "manual"] ?? "#d96c7d";
             return (
-              <div key={b.id} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-black/[0.03] transition-colors group">
+              <div key={b.id} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-black/[0.025] transition-colors group">
                 <div className="h-6 w-1 shrink-0 rounded-full" style={{ backgroundColor: color }} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-[12.5px] font-semibold text-black/80 truncate leading-tight">{b.title}</div>
-                  <div className="text-[10.5px] text-black/35 mt-0.5">{minToTime(b.startMin)}</div>
+                  <div className="text-[12.5px] font-semibold truncate leading-tight" style={{ color: "var(--text-secondary)" }}>{b.title}</div>
+                  <div className="text-[10.5px] mt-0.5" style={{ color: "var(--text-faint)" }}>{minToTime(b.startMin)}</div>
                 </div>
               </div>
             );
@@ -2612,8 +2614,8 @@ function SidebarTodayPanel() {
         )}
       </div>
       {blocks.length > 0 && (
-        <div className="px-4 py-2.5 border-t border-black/[0.04]">
-          <a href="/calendar" className="flex items-center gap-1.5 text-[11.5px] font-semibold text-black/35 hover:text-[var(--lifeos-pink)] transition-colors">
+        <div className="px-4 py-2.5" style={{ borderTop: "1px solid var(--divider)" }}>
+          <a href="/calendar" className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[var(--text-faint)] hover:text-[var(--lifeos-pink)] transition-colors">
             <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
             Open full calendar
           </a>
@@ -2658,14 +2660,14 @@ function SidebarWeekPanel() {
   if (counts.every((c) => c === 0)) return null;
 
   return (
-    <div className="rounded-2xl border border-[var(--lifeos-border-soft)] bg-white/80 backdrop-blur-sm overflow-hidden">
+    <div className="ui-card overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-black/[0.05]">
+      <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid var(--divider)" }}>
         <div className="flex items-center gap-2">
-          <span className="h-1.5 w-1.5 rounded-full bg-black/25" />
-          <span className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-black/50">This Week</span>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--text-faint)" }} />
+          <span className="ui-eyebrow">This Week</span>
         </div>
-        <a href="/calendar" className="text-[11px] font-semibold text-black/35 hover:text-[var(--lifeos-pink)] transition-colors">
+        <a href="/calendar" className="text-[11px] font-semibold text-[var(--text-faint)] hover:text-[var(--lifeos-pink)] transition-colors">
           Calendar →
         </a>
       </div>
@@ -2676,14 +2678,15 @@ function SidebarWeekPanel() {
           const hasBlocks = counts[i] > 0;
           return (
             <div key={i} className="flex flex-col items-center gap-1">
-              <span className={`text-[9px] font-bold uppercase tracking-wide ${isToday ? "text-[var(--lifeos-pink)]" : "text-black/25"}`}>
+              <span className={`text-[9px] font-bold uppercase tracking-wide ${isToday ? "text-[var(--lifeos-pink)]" : "text-[var(--text-faint)]"}`}>
                 {d[0]}
               </span>
               <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-bold transition-all
-                ${isToday && hasBlocks ? "bg-[var(--lifeos-pink)] text-white shadow-[0_2px_8px_rgba(217,108,125,0.4)]" :
+                ${isToday && hasBlocks ? "bg-[var(--lifeos-pink)] text-white" :
                   isToday ? "border-2 border-[var(--lifeos-pink)] text-[var(--lifeos-pink)]" :
-                  hasBlocks ? "bg-[var(--lifeos-pink)]/12 text-[var(--lifeos-pink)]" :
-                  "text-black/20"}`}
+                  hasBlocks ? "text-[var(--lifeos-pink)]" :
+                  "text-[var(--text-faint)]"}`}
+                style={isToday && hasBlocks ? { boxShadow: "var(--shadow-accent)" } : hasBlocks ? { background: "rgba(var(--lifeos-pink-rgb),0.1)" } : undefined}
               >
                 {hasBlocks ? counts[i] : "·"}
               </div>
@@ -4946,8 +4949,8 @@ export default function GeneratePage() {
           transition={{ duration: 0.4, ease: "easeOut", delay: 0.22 }}
           className="mt-6 flex flex-col items-center gap-2"
         >
-          <p className="text-[11px] font-bold uppercase tracking-widest text-black/20">Try typing something like</p>
-          <div className="flex flex-wrap justify-center gap-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-faint)]">Try something like</p>
+          <div className="flex flex-wrap justify-center gap-1.5">
             {[
               { label: "Essay due at midnight + gym", input: "Essay due at midnight, gym this morning, lunch and dinner" },
               { label: "Plan my whole week", input: "Plan my week: study Monday, gym Tuesday Thursday, dentist Wednesday 2pm" },
@@ -4956,7 +4959,10 @@ export default function GeneratePage() {
               <button
                 key={label}
                 onClick={() => setInput(chipInput)}
-                className="rounded-full border border-black/[0.08] bg-white px-4 py-1.5 text-[12px] font-semibold text-black/50 hover:text-black/80 hover:border-[var(--lifeos-pink)]/40 hover:bg-[var(--lifeos-pink)]/[0.04] transition-all"
+                className="rounded-full px-4 py-1.5 text-[12px] font-semibold transition-all hover:scale-[1.02] active:scale-[0.98]"
+                style={{ background: "var(--surface-raised)", border: "1px solid var(--divider)", color: "var(--text-muted)" }}
+                onMouseOver={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(var(--lifeos-pink-rgb),0.35)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--lifeos-pink)"; }}
+                onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--divider)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-muted)"; }}
               >
                 {label} →
               </button>
@@ -4996,7 +5002,7 @@ export default function GeneratePage() {
         </AnimatePresence>
 
         {/* Card container — focus ring turns pink */}
-        <div className="rounded-2xl bg-white border border-black/[0.07] shadow-[0_2px_16px_rgba(0,0,0,0.06),0_8px_40px_rgba(0,0,0,0.04)] overflow-hidden focus-within:border-[var(--lifeos-pink)]/50 focus-within:shadow-[0_2px_16px_rgba(217,108,125,0.08),0_8px_40px_rgba(217,108,125,0.1)] transition-all duration-250">
+        <div className="rounded-2xl overflow-hidden transition-all duration-250" style={{ background: "var(--surface-raised)", border: "1px solid var(--divider)", boxShadow: "var(--shadow-md)" }} onFocus={(e) => { (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 16px rgba(var(--lifeos-pink-rgb),0.1), 0 8px 40px rgba(var(--lifeos-pink-rgb),0.12)"; (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(var(--lifeos-pink-rgb),0.4)"; }} onBlur={(e) => { (e.currentTarget as HTMLDivElement).style.boxShadow = "var(--shadow-md)"; (e.currentTarget as HTMLDivElement).style.borderColor = "var(--divider)"; }}>
 
           {/* Textarea */}
           <textarea

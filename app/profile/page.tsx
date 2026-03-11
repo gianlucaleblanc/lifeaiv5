@@ -104,23 +104,24 @@ function ProfilePicture({
       {showMenu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
-          <div className="absolute left-0 top-[88px] z-50 w-44 rounded-2xl bg-white border border-black/[0.08] shadow-xl overflow-hidden">
+          <div className="absolute left-0 top-[88px] z-50 w-44 rounded-2xl overflow-hidden" style={{ background: "var(--surface-overlay)", border: "1px solid var(--divider)", boxShadow: "var(--shadow-lg)" }}>
             <button
               onClick={() => { fileInputRef.current?.click(); }}
-              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold text-black/70 hover:bg-black/[0.04] transition-colors text-left"
+              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold text-[var(--text-secondary)] hover:bg-black/[0.04] transition-colors text-left"
             >
               <span className="text-base">📷</span> Upload photo
             </button>
             <button
               onClick={() => { fileInputRef.current?.click(); }}
-              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold text-black/70 hover:bg-black/[0.04] transition-colors text-left"
+              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold text-[var(--text-secondary)] hover:bg-black/[0.04] transition-colors text-left"
             >
               <span className="text-base">🖼️</span> Choose from library
             </button>
             {photoUrl && (
               <button
                 onClick={removePhoto}
-                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold text-red-500 hover:bg-red-50 transition-colors text-left border-t border-black/[0.05]"
+                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold text-red-500 hover:bg-red-50 transition-colors text-left"
+                style={{ borderTop: "1px solid var(--divider)" }}
               >
                 <span className="text-base">🗑️</span> Remove photo
               </button>
@@ -141,11 +142,11 @@ function Toggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void 
   return (
     <button
       onClick={onToggle}
-      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none hover:scale-105 active:scale-95 ${enabled ? "bg-[var(--lifeos-pink)]" : "bg-black/[0.12]"}`}
+      className={`relative inline-flex h-[22px] w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-all duration-200 focus:outline-none active:scale-95 ${enabled ? "bg-[var(--lifeos-pink)]" : "bg-black/[0.12]"}`}
       role="switch"
       aria-checked={enabled}
     >
-      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${enabled ? "translate-x-5" : "translate-x-0"}`} />
+      <span className={`pointer-events-none inline-block h-[18px] w-[18px] transform rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.25)] ring-0 transition duration-200 ${enabled ? "translate-x-[18px]" : "translate-x-0"}`} />
     </button>
   );
 }
@@ -289,10 +290,10 @@ export default function ProfilePage() {
   return (
     <div
       className="relative min-h-[calc(100vh-80px)] flex flex-col"
-      style={{ background: "radial-gradient(ellipse 60% 40% at 50% 0%, rgba(255,107,107,0.06) 0%, transparent 65%)" }}
+      style={{ background: "radial-gradient(ellipse 60% 40% at 50% 0%, rgba(var(--lifeos-pink-rgb), 0.055) 0%, transparent 65%)" }}
     >
       {/* ── Profile header ── */}
-      <div className="flex items-center gap-5 mb-8">
+      <div className="flex items-center gap-5 mb-7">
         <ProfilePicture
           userName={userName}
           photoUrl={photoUrl}
@@ -300,102 +301,103 @@ export default function ProfilePage() {
           onPhotoChange={setPhotoUrl}
         />
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-extrabold text-black" style={{ letterSpacing: "-0.03em" }}>
+          <h1 className="text-[22px] font-extrabold text-black" style={{ letterSpacing: "-0.03em", lineHeight: 1.2 }}>
             {userName ? `Hey, ${userName}` : "Your Profile"}
           </h1>
-          <div className="mt-1 flex items-center gap-2 flex-wrap">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--lifeos-pink)]/10 px-3 py-1 text-xs font-bold text-[var(--lifeos-pink)]">
+          <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+            <span className="ui-badge" style={{ color: "var(--lifeos-pink)", background: "rgba(var(--lifeos-pink-rgb),0.1)" }}>
               ✦ {consistencyLabel}
             </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-black/[0.05] px-3 py-1 text-xs font-semibold text-black/50">
+            <span className="ui-badge">
               {profile.daysTracked} day{profile.daysTracked !== 1 ? "s" : ""} tracked
             </span>
           </div>
-          <p className="mt-1.5 text-[11px] text-black/30 font-medium">Tap your photo to change it</p>
+          <p className="mt-1.5 text-[11px] text-[var(--text-faint)] font-medium">Tap your photo to change it</p>
         </div>
       </div>
 
       {/* ── Stat cards row ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-        <div className="col-span-2 sm:col-span-1 rounded-2xl bg-white border border-black/[0.06] p-5 flex flex-col gap-1">
-          <div className="text-[11px] font-bold uppercase tracking-widest text-black/30">Avg completion</div>
-          <div className="text-4xl font-extrabold text-black" style={{ letterSpacing: "-0.04em" }}>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-5">
+        <div className="col-span-2 sm:col-span-1 ui-card p-5 flex flex-col gap-1">
+          <div className="ui-eyebrow">Avg completion</div>
+          <div className="text-[32px] font-extrabold text-[var(--text-primary)]" style={{ letterSpacing: "-0.04em", lineHeight: 1 }}>
             {avgPct > 0 ? `${avgPct}%` : "—"}
           </div>
-          <div className="text-xs text-black/40 font-medium">over recent plans</div>
+          <div className="text-xs text-[var(--text-faint)] font-medium mt-0.5">over recent plans</div>
           {avgPct > 0 && (
             <>
-              <div className="mt-3 h-2 rounded-full bg-black/[0.06] overflow-hidden">
+              <div className="mt-3 h-1.5 rounded-full bg-black/[0.06] overflow-hidden">
                 <div className="h-full rounded-full bg-[var(--lifeos-pink)] transition-all duration-700" style={{ width: `${avgPct}%` }} />
               </div>
-              <div className="mt-1 text-[10px] text-black/30 leading-snug">{coachFeedback}</div>
+              <div className="mt-1.5 text-[10px] text-[var(--text-faint)] leading-snug">{coachFeedback}</div>
             </>
           )}
-          {avgPct === 0 && <div className="mt-1 text-[10px] text-black/30">Generate your first plan to start tracking.</div>}
+          {avgPct === 0 && <div className="mt-1 text-[10px] text-[var(--text-faint)]">Generate your first plan to start tracking.</div>}
         </div>
 
-        <div className="rounded-2xl bg-white border border-black/[0.06] p-5 flex flex-col gap-1">
-          <div className="text-[11px] font-bold uppercase tracking-widest text-black/30">Days tracked</div>
-          <div className="text-4xl font-extrabold text-black" style={{ letterSpacing: "-0.04em" }}>
+        <div className="ui-card p-5 flex flex-col gap-1">
+          <div className="ui-eyebrow">Days tracked</div>
+          <div className="text-[32px] font-extrabold text-[var(--text-primary)]" style={{ letterSpacing: "-0.04em", lineHeight: 1 }}>
             {profile.daysTracked > 0 ? profile.daysTracked : "—"}
           </div>
-          <div className="text-xs text-black/40 font-medium">since you started</div>
+          <div className="text-xs text-[var(--text-faint)] font-medium mt-0.5">since you started</div>
         </div>
 
-        <div className="rounded-2xl bg-white border border-black/[0.06] p-5 flex flex-col gap-1">
-          <div className="text-[11px] font-bold uppercase tracking-widest text-black/30">Streak</div>
-          <div className="text-4xl font-extrabold text-black" style={{ letterSpacing: "-0.04em" }}>
+        <div className="ui-card p-5 flex flex-col gap-1">
+          <div className="ui-eyebrow">Streak</div>
+          <div className="text-[32px] font-extrabold text-[var(--text-primary)]" style={{ letterSpacing: "-0.04em", lineHeight: 1 }}>
             {streak > 0 ? `🔥 ${streak}` : "—"}
           </div>
-          <div className="text-xs text-black/40 font-medium">{streak > 0 ? "days in a row" : "Start today!"}</div>
+          <div className="text-xs text-[var(--text-faint)] font-medium mt-0.5">{streak > 0 ? "days in a row" : "Start today!"}</div>
         </div>
       </div>
 
       {/* ── Last 7 days bar chart ── */}
-      <div className="rounded-2xl bg-white border border-black/[0.06] p-5 mb-4">
+      <div className="ui-card p-5 mb-4">
         <div className="flex items-center justify-between mb-4">
-          <div className="text-xs font-bold text-black/70">Last 7 days</div>
-          <div className="text-[10px] text-black/30">completion %</div>
+          <div className="text-xs font-bold text-[var(--text-secondary)]">Last 7 days</div>
+          <div className="text-[10px] text-[var(--text-faint)]">completion %</div>
         </div>
         {trend.length ? (
-          <div className="flex items-end justify-between gap-2 h-20">
+          <div className="flex items-end justify-between gap-1.5 h-20">
             {trend.map((d) => {
               const pct = Math.round(d.completion * 100);
               const heightPct = Math.max(6, pct);
-              const barColor = pct >= 70 ? "bg-[var(--lifeos-pink)]" : pct >= 40 ? "bg-[var(--lifeos-pink)]/60" : "bg-black/[0.08]";
+              const barColor = pct >= 70 ? "bg-[var(--lifeos-pink)]" : pct >= 40 ? "bg-[var(--lifeos-pink)]/50" : "bg-black/[0.07]";
               return (
                 <div key={d.date} className="flex flex-col items-center gap-1.5 flex-1 group">
-                  <div className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] font-bold text-black/50 pointer-events-none">{pct}%</div>
-                  <div className="w-full flex items-end" style={{ height: 60 }}>
-                    <div className={`w-full rounded-lg transition-all duration-500 hover:opacity-80 ${barColor}`} style={{ height: `${heightPct}%` }} title={`${d.date} · ${pct}%`} />
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] font-bold text-[var(--text-muted)] pointer-events-none">{pct}%</div>
+                  <div className="w-full flex items-end" style={{ height: 56 }}>
+                    <div className={`w-full rounded-md transition-all duration-500 hover:opacity-80 ${barColor}`} style={{ height: `${heightPct}%` }} title={`${d.date} · ${pct}%`} />
                   </div>
-                  <div className="text-[10px] font-semibold text-black/30">{weekdayShort(d.date)}</div>
+                  <div className="text-[9px] font-bold text-[var(--text-faint)] uppercase tracking-wide">{weekdayShort(d.date)}</div>
                 </div>
               );
             })}
           </div>
         ) : (
           <div className="h-20 flex items-center justify-center">
-            <p className="text-xs text-black/30">No data yet — generate your first plan.</p>
+            <p className="text-xs text-[var(--text-faint)]">No data yet — generate your first plan.</p>
           </div>
         )}
       </div>
 
       {/* ── Achievements ── */}
-      <div className="rounded-2xl bg-white border border-black/[0.06] p-5 mb-4">
+      <div className="ui-card p-5 mb-4">
         <div className="flex items-center justify-between mb-4">
-          <div className="text-[11px] font-bold uppercase tracking-widest text-black/30">Achievements</div>
-          <div className="text-xs font-semibold text-black/40">{earnedCount}/{badges.length} earned</div>
+          <div className="ui-eyebrow">Achievements</div>
+          <div className="text-xs font-semibold text-[var(--text-muted)]">{earnedCount}/{badges.length} earned</div>
         </div>
-        <div className="grid grid-cols-4 sm:grid-cols-8 gap-3">
+        <div className="grid grid-cols-4 sm:grid-cols-8 gap-2.5">
           {badges.map((badge) => (
             <div key={badge.title} className="group flex flex-col items-center gap-1.5 relative" title={`${badge.title}: ${badge.desc}`}>
-              <div className={`h-12 w-12 rounded-2xl flex items-center justify-center text-2xl transition-all ${badge.earned ? "bg-[var(--lifeos-pink)]/10 shadow-[0_2px_8px_rgba(255,107,107,0.15)]" : "bg-black/[0.04] grayscale opacity-40"}`}>
+              <div className={`h-11 w-11 rounded-[14px] flex items-center justify-center text-xl transition-all duration-200 ${badge.earned ? "shadow-[var(--shadow-sm)]" : "grayscale opacity-30"}`}
+                style={badge.earned ? { background: "rgba(var(--lifeos-pink-rgb),0.09)", boxShadow: "0 1px 6px rgba(var(--lifeos-pink-rgb),0.12)" } : { background: "var(--surface-subtle)" }}>
                 {badge.emoji}
               </div>
-              <div className={`text-[9px] font-bold text-center leading-tight ${badge.earned ? "text-black/60" : "text-black/25"}`}>{badge.title}</div>
+              <div className={`text-[9px] font-bold text-center leading-tight ${badge.earned ? "text-[var(--text-secondary)]" : "text-[var(--text-faint)]"}`}>{badge.title}</div>
               {badge.earned && (
-                <div className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-emerald-400 border-2 border-white flex items-center justify-center">
+                <div className="absolute -top-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-emerald-400 border-2 border-white flex items-center justify-center">
                   <span className="text-white" style={{ fontSize: 7, lineHeight: 1 }}>✓</span>
                 </div>
               )}
@@ -405,14 +407,14 @@ export default function ProfilePage() {
       </div>
 
       {/* ── AI coach card ── */}
-      <div className="rounded-2xl border border-[var(--lifeos-pink)]/20 bg-[var(--lifeos-pink)]/5 p-5 mb-4">
+      <div className="rounded-2xl border p-5 mb-4" style={{ borderColor: "rgba(var(--lifeos-pink-rgb),0.2)", background: "rgba(var(--lifeos-pink-rgb),0.04)" }}>
         <div className="flex items-start gap-3">
-          <div className="h-8 w-8 rounded-xl bg-[var(--lifeos-pink)] flex-shrink-0 grid place-items-center shadow-[0_2px_8px_rgba(255,107,107,0.3)]">
-            <span className="text-white text-sm">✦</span>
+          <div className="h-8 w-8 rounded-[10px] bg-[var(--lifeos-pink)] flex-shrink-0 grid place-items-center" style={{ boxShadow: "var(--shadow-accent)" }}>
+            <span className="text-white text-sm font-bold">✦</span>
           </div>
           <div>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--lifeos-pink)]/60 mb-1">Coach tip</div>
-            <p className="text-sm font-semibold text-black/80">{suggestion}</p>
+            <div className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: "rgba(var(--lifeos-pink-rgb),0.6)" }}>Coach tip</div>
+            <p className="text-sm font-semibold text-[var(--text-secondary)] leading-relaxed">{suggestion}</p>
           </div>
         </div>
       </div>
@@ -447,23 +449,23 @@ export default function ProfilePage() {
       )}
 
       {/* ── Settings section ── */}
-      <div className="rounded-2xl bg-white border border-black/[0.06] p-5">
-        <div className="text-[11px] font-bold uppercase tracking-widest text-black/30 mb-4">Settings</div>
-        <div className="space-y-1">
+      <div className="ui-card p-5">
+        <div className="ui-eyebrow mb-4">Settings</div>
+        <div className="space-y-0.5">
 
           {/* Accent color */}
-          <div className="flex items-center gap-4 rounded-xl px-4 py-3">
-            <span className="text-xl flex-shrink-0">🎨</span>
+          <div className="ui-settings-row" style={{ cursor: "default" }}>
+            <div className="ui-settings-icon">🎨</div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-black/80">Accent color</div>
-              <div className="text-xs text-black/40">Personalise your OpenHour theme</div>
+              <div className="text-sm font-semibold text-[var(--text-primary)]">Accent color</div>
+              <div className="text-xs text-[var(--text-faint)]">Personalise your OpenHour theme</div>
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
               {ACCENT_COLORS.map(({ color, label }) => (
                 <button
                   key={color}
                   onClick={() => changeAccent(color)}
-                  className="h-5 w-5 rounded-full transition-all hover:scale-125 active:scale-95 flex-shrink-0"
+                  className="h-[18px] w-[18px] rounded-full transition-all hover:scale-125 active:scale-95 flex-shrink-0"
                   style={{
                     backgroundColor: color,
                     outline: accentColor === color ? `2px solid ${color}` : "2px solid transparent",
@@ -477,48 +479,48 @@ export default function ProfilePage() {
           </div>
 
           {/* Dark mode toggle */}
-          <div className="flex items-center gap-4 rounded-xl px-4 py-3 hover:bg-black/[0.03] transition-colors">
-            <span className="text-xl flex-shrink-0">🌙</span>
+          <div className="ui-settings-row">
+            <div className="ui-settings-icon">🌙</div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-black/80">Dark mode</div>
-              <div className="text-xs text-black/40">Switch to a darker interface</div>
+              <div className="text-sm font-semibold text-[var(--text-primary)]">Dark mode</div>
+              <div className="text-xs text-[var(--text-faint)]">Switch to a darker interface</div>
             </div>
             {prefs !== null && <Toggle enabled={prefs.darkMode} onToggle={() => togglePref("darkMode")} />}
           </div>
 
           {/* AI suggestions toggle */}
-          <div className="flex items-center gap-4 rounded-xl px-4 py-3 hover:bg-black/[0.03] transition-colors">
-            <span className="text-xl flex-shrink-0">✨</span>
+          <div className="ui-settings-row">
+            <div className="ui-settings-icon">✨</div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-black/80">AI suggestions</div>
-              <div className="text-xs text-black/40">Show prep & recovery ideas after scheduling</div>
+              <div className="text-sm font-semibold text-[var(--text-primary)]">AI suggestions</div>
+              <div className="text-xs text-[var(--text-faint)]">Show prep & recovery ideas after scheduling</div>
             </div>
             {prefs !== null && <Toggle enabled={prefs.suggestionsEnabled} onToggle={() => togglePref("suggestionsEnabled")} />}
           </div>
 
           {/* Notifications toggle */}
-          <div className="flex items-center gap-4 rounded-xl px-4 py-3 hover:bg-black/[0.03] transition-colors">
-            <span className="text-xl flex-shrink-0">🔔</span>
+          <div className="ui-settings-row">
+            <div className="ui-settings-icon">🔔</div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-black/80">Notifications</div>
-              <div className="text-xs text-black/40">15-min reminders for today&apos;s events</div>
+              <div className="text-sm font-semibold text-[var(--text-primary)]">Notifications</div>
+              <div className="text-xs text-[var(--text-faint)]">15-min reminders for today&apos;s events</div>
             </div>
             {prefs !== null && <Toggle enabled={prefs.notificationsEnabled ?? false} onToggle={toggleNotifications} />}
           </div>
 
           {/* Cloud sync row — shows only when signed in */}
           {user && (
-            <div className="flex items-center gap-4 rounded-xl px-4 py-3 hover:bg-black/[0.03] transition-colors">
-              <span className="text-xl flex-shrink-0">☁️</span>
+            <div className="ui-settings-row">
+              <div className="ui-settings-icon">☁️</div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-black/80">Cloud sync</div>
-                <div className="text-xs text-black/40 truncate">Syncing as {user.email}</div>
+                <div className="text-sm font-semibold text-[var(--text-primary)]">Cloud sync</div>
+                <div className="text-xs text-[var(--text-faint)] truncate">Syncing as {user.email}</div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.6)]" />
+                <span className="h-2 w-2 rounded-full bg-emerald-400" style={{ boxShadow: "0 0 5px rgba(52,211,153,0.7)" }} />
                 <button
                   onClick={() => { signOut(); toast("Signed out", "info"); }}
-                  className="text-xs text-black/40 hover:text-black/70 transition-colors px-3 py-1.5 rounded-lg hover:bg-black/[0.05] font-semibold"
+                  className="text-xs text-[var(--text-faint)] hover:text-[var(--text-muted)] transition-colors px-3 py-1.5 rounded-lg hover:bg-black/[0.05] font-semibold"
                 >
                   Sign out
                 </button>
@@ -529,32 +531,32 @@ export default function ProfilePage() {
           {/* Coming soon — collapsed row */}
           <button
             onClick={() => setShowSoonExpanded((v) => !v)}
-            className="w-full flex items-center gap-4 rounded-xl px-4 py-3 hover:bg-black/[0.03] transition-colors text-left"
+            className="ui-settings-row w-full text-left"
           >
-            <span className="text-xl flex-shrink-0">🚀</span>
+            <div className="ui-settings-icon">🚀</div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-black/80">Coming soon</div>
-              <div className="text-xs text-black/40">Google Calendar sync &amp; more</div>
+              <div className="text-sm font-semibold text-[var(--text-primary)]">Coming soon</div>
+              <div className="text-xs text-[var(--text-faint)]">Google Calendar sync &amp; more</div>
             </div>
-            <span className={`text-black/25 transition-transform duration-200 ${showSoonExpanded ? "rotate-90" : ""}`}>›</span>
+            <span className={`text-[var(--text-faint)] transition-transform duration-200 text-sm ${showSoonExpanded ? "rotate-90" : ""}`}>›</span>
           </button>
           {showSoonExpanded && (
-            <div className="mx-4 mb-1 rounded-xl border border-black/[0.05] bg-black/[0.02] divide-y divide-black/[0.04] overflow-hidden">
+            <div className="mx-2 mb-1 rounded-xl border divide-y overflow-hidden" style={{ borderColor: "var(--divider)", background: "var(--surface-subtle)" }}>
               <div className="flex items-center gap-3 px-4 py-3 opacity-50">
                 <span className="text-base">🔔</span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-semibold text-black/70">Reminders (advanced)</div>
-                  <div className="text-[11px] text-black/40">Custom reminder times &amp; recurring schedules</div>
+                  <div className="text-xs font-semibold text-[var(--text-secondary)]">Reminders (advanced)</div>
+                  <div className="text-[11px] text-[var(--text-faint)]">Custom reminder times &amp; recurring schedules</div>
                 </div>
-                <span className="text-[10px] text-black/30 font-bold bg-black/[0.06] rounded-full px-2 py-0.5">Soon</span>
+                <span className="text-[10px] text-[var(--text-faint)] font-bold rounded-full px-2 py-0.5" style={{ background: "var(--surface-subtle)" }}>Soon</span>
               </div>
               <div className="flex items-center gap-3 px-4 py-3 opacity-50">
                 <span className="text-base">🗓</span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-semibold text-black/70">Google Calendar sync</div>
-                  <div className="text-[11px] text-black/40">Two-way sync with your Google Calendar</div>
+                  <div className="text-xs font-semibold text-[var(--text-secondary)]">Google Calendar sync</div>
+                  <div className="text-[11px] text-[var(--text-faint)]">Two-way sync with your Google Calendar</div>
                 </div>
-                <span className="text-[10px] text-black/30 font-bold bg-black/[0.06] rounded-full px-2 py-0.5">Soon</span>
+                <span className="text-[10px] text-[var(--text-faint)] font-bold rounded-full px-2 py-0.5" style={{ background: "var(--surface-subtle)" }}>Soon</span>
               </div>
             </div>
           )}
@@ -562,14 +564,14 @@ export default function ProfilePage() {
           {/* Data & privacy — opens modal */}
           <button
             onClick={() => setShowPrivacyModal(true)}
-            className="w-full flex items-center gap-4 rounded-xl px-4 py-3 hover:bg-black/[0.03] transition-colors text-left"
+            className="ui-settings-row w-full text-left"
           >
-            <span className="text-xl flex-shrink-0">🔒</span>
+            <div className="ui-settings-icon">🔒</div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-black/80">Data &amp; privacy</div>
-              <div className="text-xs text-black/40">All data stored locally on your device</div>
+              <div className="text-sm font-semibold text-[var(--text-primary)]">Data &amp; privacy</div>
+              <div className="text-xs text-[var(--text-faint)]">All data stored locally on your device</div>
             </div>
-            <span className="text-black/20 flex-shrink-0">›</span>
+            <span className="text-[var(--text-faint)] flex-shrink-0 text-sm">›</span>
           </button>
 
           {/* Privacy modal */}
@@ -579,32 +581,34 @@ export default function ProfilePage() {
               onClick={() => setShowPrivacyModal(false)}
             >
               <div
-                className="w-full max-w-sm rounded-3xl bg-white border border-black/[0.06] shadow-2xl p-6 space-y-4"
+                className="w-full max-w-sm rounded-3xl shadow-[var(--shadow-xl)] p-6 space-y-4"
+                style={{ background: "var(--surface-raised)", border: "1px solid var(--divider)" }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-2xl bg-black/[0.05] grid place-items-center flex-shrink-0">
+                  <div className="h-10 w-10 rounded-2xl grid place-items-center flex-shrink-0" style={{ background: "var(--surface-subtle)" }}>
                     <span className="text-lg">🔒</span>
                   </div>
                   <div>
-                    <div className="text-base font-bold text-black/80">Data &amp; Privacy</div>
-                    <div className="text-xs text-black/40">How OpenHour stores your information</div>
+                    <div className="text-base font-bold text-[var(--text-primary)]">Data &amp; Privacy</div>
+                    <div className="text-xs text-[var(--text-faint)]">How OpenHour stores your information</div>
                   </div>
                 </div>
-                <div className="space-y-3 text-sm text-black/60 leading-relaxed">
+                <div className="space-y-3 text-sm text-[var(--text-muted)] leading-relaxed">
                   <p>
-                    <span className="font-semibold text-black/80">100% local storage.</span> All your plans, calendar blocks, and preferences are saved only in your browser&apos;s localStorage. Nothing is sent to any server.
+                    <span className="font-semibold text-[var(--text-secondary)]">100% local storage.</span> All your plans, calendar blocks, and preferences are saved only in your browser&apos;s localStorage. Nothing is sent to any server.
                   </p>
                   <p>
-                    <span className="font-semibold text-black/80">AI calls are stateless.</span> When you generate a plan or import a syllabus, your text is sent to the AI API for that request only and is not stored or used for training.
+                    <span className="font-semibold text-[var(--text-secondary)]">AI calls are stateless.</span> When you generate a plan or import a syllabus, your text is sent to the AI API for that request only and is not stored or used for training.
                   </p>
                   <p>
-                    <span className="font-semibold text-black/80">Clear your data anytime.</span> Clearing your browser&apos;s site data for this app removes everything instantly.
+                    <span className="font-semibold text-[var(--text-secondary)]">Clear your data anytime.</span> Clearing your browser&apos;s site data for this app removes everything instantly.
                   </p>
                 </div>
                 <button
                   onClick={() => setShowPrivacyModal(false)}
-                  className="w-full rounded-2xl bg-black/[0.05] py-3 text-sm font-bold text-black/60 hover:bg-black/[0.08] transition-colors"
+                  className="w-full rounded-2xl py-3 text-sm font-bold text-[var(--text-muted)] hover:opacity-80 transition-opacity"
+                  style={{ background: "var(--surface-subtle)" }}
                 >
                   Got it
                 </button>

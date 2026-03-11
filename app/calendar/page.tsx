@@ -615,8 +615,8 @@ export default function CalendarPage() {
 
         {/* ── Mini calendar sidebar ── */}
         <aside className="hidden lg:block space-y-4">
-          <div className="rounded-2xl bg-white border border-black/[0.06] p-5">
-            <div className="text-sm font-extrabold text-black" style={{ letterSpacing: "-0.02em" }}>{formatHeader(cursor)}</div>
+          <div className="ui-card p-5">
+            <div className="text-sm font-extrabold text-[var(--text-primary)]" style={{ letterSpacing: "-0.02em" }}>{formatHeader(cursor)}</div>
             <div className="mt-4 grid grid-cols-7 gap-1 text-center">
               {["M","T","W","T","F","S","S"].map((d, i) => (
                 <div key={i} className="text-[10px] font-bold text-black/30">{d}</div>
@@ -660,12 +660,12 @@ export default function CalendarPage() {
                 className="rounded-xl border border-black/[0.07] bg-white py-2 text-xs font-bold text-black/50 hover:bg-black/[0.04] transition-colors">Next →</button>
             </div>
           </div>
-          <div className="rounded-2xl bg-white border border-black/[0.06] p-5">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-black/30 mb-2">Tips</div>
-            <ul className="space-y-2">
+          <div className="ui-card p-5">
+            <div className="ui-eyebrow mb-2.5">Tips</div>
+            <ul className="space-y-2.5">
               {["Generate a plan, then tap Add to Calendar.", "Double-click any slot to create a block.", "Drag blocks to reschedule them."].map((tip, i) => (
-                <li key={i} className="flex items-start gap-2 text-xs text-black/50">
-                  <span className="text-[var(--lifeos-pink)] flex-shrink-0">✦</span>{tip}
+                <li key={i} className="flex items-start gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
+                  <span className="text-[var(--lifeos-pink)] flex-shrink-0 font-bold">✦</span>{tip}
                 </li>
               ))}
             </ul>
@@ -677,8 +677,8 @@ export default function CalendarPage() {
           {/* Toolbar */}
           <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
             <div>
-              <div className="text-[11px] font-bold uppercase tracking-widest text-black/30">Calendar</div>
-              <div className="text-2xl font-extrabold text-black" style={{ letterSpacing: "-0.03em" }}>{formatHeader(cursor)}</div>
+              <div className="ui-eyebrow mb-0.5">Calendar</div>
+              <div className="text-[22px] font-extrabold text-[var(--text-primary)]" style={{ letterSpacing: "-0.03em", lineHeight: 1.2 }}>{formatHeader(cursor)}</div>
             </div>
             <div className="flex items-center gap-2">
               {/* View toggle */}
@@ -798,7 +798,7 @@ export default function CalendarPage() {
           {viewMode === "week" && (
             <>
               {/* Outer card — overflow-x scroll so columns never squish below minDayColPx */}
-              <div className="rounded-2xl border border-black/[0.06] bg-white shadow-[0_2px_12px_rgba(0,0,0,0.05)] overflow-x-auto overflow-y-hidden">
+              <div className="rounded-2xl overflow-x-auto overflow-y-hidden" style={{ border: "1px solid var(--divider)", background: "var(--surface-raised)", boxShadow: "var(--shadow-sm)" }}>
                 {/* Inner min-width wrapper so the grid can exceed the card width */}
                 <div
                   ref={scrollRef}
