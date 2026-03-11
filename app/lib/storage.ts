@@ -48,6 +48,8 @@ export type Plan = {
   coach: string;
   personalInsight?: string;
   streak?: number;
+  confidence?: number;    // 0.0–1.0 self-assessed by the AI model
+  ambiguities?: string[]; // things the model had to guess (shown as warnings in UI)
   profile?: {
     summary: string;
     doMore: string[];

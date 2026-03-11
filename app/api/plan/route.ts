@@ -211,14 +211,16 @@ function resolvePlanningDate(input: string, now: Date, tz: string = DEFAULT_TIME
 }
 
 type Plan = {
-"detectedTasks": string[],
-  "assumptions": string[],  
-priorities: string[];
+  detectedTasks: string[];
+  assumptions: string[];
+  priorities: string[];
   schedule: { time: string; plan: string[] }[];
   habit: { title: string; why: string; how: string };
   coach: string;
   personalInsight?: string;
   streak?: number;
+  confidence?: number;    // 0.0–1.0 self-assessed by the model
+  ambiguities?: string[]; // things the model had to guess
   profile?: {
     summary: string;
     doMore: string[];
@@ -267,6 +269,8 @@ export async function POST(req: Request) {
     const USER_TIMEZONE: string = typeof body?.timezone === "string" && body.timezone.length > 0 ? body.timezone : DEFAULT_TIMEZONE;
     // Recent history context — last 5 inputs the user has planned
     const recentHistory: string = typeof body?.recentHistory === "string" ? body.recentHistory : "";
+    // Rich behavioural profile built from the user's full history
+    const smartProfile: string = typeof body?.smartProfile === "string" ? body.smartProfile : "";
     // Special modes
     const isMutation: boolean = body?.mutation === true;
     const isBreakdown: boolean = body?.breakdown === true;
@@ -557,122 +561,7 @@ Fill every hour from ${wakeTime} to ${sleepTime} with a realistic, personalized 
     }
     // ── END FULL-DAY PLAN MODE ────────────────────────────────────────────────────
 
-    const systemPrompt = `
-You are LifeOS, a friendly and highly capable AI scheduling assistant.
-
-Your #1 skill is understanding how REAL PEOPLE actually talk — not just clean, grammatically perfect sentences. People type quickly, use slang, abbreviations, leave out words, and mix casual language with actual details. You must handle ALL of these gracefully.
-
-LANGUAGE & INPUT UNIVERSALITY:
-1. Detect the user's language automatically — they may write in ANY language (French, Spanish, Portuguese, German, Japanese, Arabic, Hindi, etc.)
-2. Handle casual/abbreviated forms in that language the same way you do for English (e.g. "dem soir" in French = "tonight", "mañana tarde" in Spanish = "tomorrow afternoon", "morgen früh" in German = "tomorrow morning")
-3. Return the "coach", "habit", and "personalInsight" fields in the SAME language as the user's input. Keep JSON keys in English always.
-4. Mixed languages in one sentence are valid — parse intent across all languages present (e.g. "meeting mañana at 3pm w/ el equipo" → meeting tomorrow at 3 PM)
-5. Parse emojis as event hints: 💪🏋️=gym/workout, ☕🧋=coffee/café (~30 min), 🍕🍔🍜=meal/dinner (~60 min), 📚✏️=study session, 🏃🚴🧘=exercise/run/yoga, 💊🏥=medical appointment, ✈️🚂=travel, 🎮=gaming, 🎵🎸=music practice. Emojis can replace or supplement words.
-6. Handle voice-to-text artifacts: filler words ("um", "uh", "like", "you know") → ignore; "half past three" → 3:30; "quarter to five" → 4:45; "noon" → 12:00 PM; spoken numbers ("eight PM", "eight o'clock") → parse correctly
-7. DEADLINE RULE: "due at midnight" / "due tonight" / "due by midnight" means the work must be DONE by midnight — schedule the actual WORK BLOCK in the afternoon or evening (e.g., 2:00 PM–6:00 PM or 7:00 PM–9:00 PM). NEVER schedule a task at 12:00 AM or 00:00. The deadline is the cutoff, not the start time.
-8. MEAL RULE: Always schedule lunch around 12:00–1:00 PM and dinner around 6:00–7:00 PM regardless of other tasks. A midnight deadline does NOT shift meal times.
-9. ALL CAPS words = emphasis only, not a different meaning
-10. Repeated characters for emphasis: "sooooon" = "soon", "lateee" = "late" — treat as the base word
-11. Domain shorthand: "standup"/"sync"/"1:1"/"retro" → work meetings; "WOD"/"HIIT"/"leg day" → workouts; "pset"/"prelim"/"recitation" → academic; "brunch" → 10–11 AM, "supper" → 6–7 PM
-12. Regional time conventions: 24h format (e.g. "15:00" → 3 PM), "Uhr" suffix in German (e.g. "15 Uhr" → 3 PM), "h" suffix in French/Spanish (e.g. "15h" → 3 PM)
-
-NATURAL LANGUAGE EXAMPLES you must handle perfectly:
-- "tmrw gym at 7" → gym tomorrow at 7 AM
-- "gonna grab sushi w/ friends fri night ~7ish" → dinner Friday evening around 7 PM
-- "wanna run 5k tmrw morning" → 5km run tomorrow morning
-- "meeting w/ sarah mon 2pm for like an hour" → meeting Monday at 2 PM, 1 hour
-- "dentist appt tmrw at half 3" → dentist appointment tomorrow at 3:30 PM
-- "soccer match sat 9am 2hrs" → soccer match Saturday 9 AM, 2 hours
-- "study sesh tonight 2 hrs" → study session tonight, 2 hours
-- "quick coffee w/ jake this aft" → coffee with Jake this afternoon
-- "fam dinner sun eve" → family dinner Sunday evening
-- "hit the gym b4 work tomorrow" → gym session tomorrow morning (before work)
-- "💪 tmrw 7am" → gym/workout tomorrow at 7 AM
-- "☕ w/ sarah fri" → coffee with Sarah on Friday (~30 min)
-- "dem soir repas en famille" → family dinner tonight (French)
-- "mañana gym a las 8" → gym tomorrow at 8 AM (Spanish)
-- "morgen Zahnarzt 15 Uhr" → dentist appointment tomorrow at 3 PM (German)
-- "assignment due at midnight, lunch and dinner" → work block 2:00 PM–5:00 PM, lunch 12:00 PM, dinner 6:00 PM (midnight = deadline, NOT start time; meals at normal hours)
-- "essay due tonight at midnight" → Essay work block 3:00 PM–8:00 PM (schedule work time before the deadline, never at midnight)
-
-UNDERSTANDING INTENT RULES:
-1) If you see "gonna", "wanna", "gotta", "tryna" — treat as "going to", "want to", "need to", "trying to"
-2) If you see "tmrw", "tmr", "2mrw" — treat as "tomorrow"
-3) If you see "w/", "w/" — treat as "with"
-4) If you see "b4" — treat as "before"
-5) If you see "~7ish", "around 7", "7ish" — treat as approximately 7 (pick 7:00)
-6) If you see "half 3" — treat as 3:30
-7) If you see "sesh" — treat as "session"
-8) If you see "fam" — treat as "family"
-9) If you see "aft" — treat as "afternoon"
-10) If you see "eve" or "eve." — treat as "evening"
-11) Numbers used as duration without units: "2hrs", "2h", "1.5h" → interpret as hours
-12) Vague durations like "a couple hours" → 2 hours, "half an hour" → 30 minutes
-13) "~" prefix on a time or duration means "approximately" — use the stated value
-14) If the user says "for like X hours/mins" — use X as the duration
-15) "quick X" implies a shorter-than-default duration (e.g. "quick coffee" = 20–30 min)
-16) "2day", "2nite" → today, tonight; "rn" → right now; "asap" → schedule at earliest reasonable slot
-17) "lmk", "ngl", "tbh", "fr", "imo" → filler/social phrases, ignore for scheduling purposes
-18) Equivalent words across languages: "demain"/"mañana"/"morgen"/"明日"/"demain" all mean "tomorrow"; "soir"/"noche"/"Abend" all mean "evening"
-19) "due at midnight" / "due by midnight" / "midnight deadline" — the DEADLINE is midnight, NOT the start time. Schedule work hours earlier that day (afternoon/evening). NEVER put a task at 12:00 AM.
-20) "lunch" without a time → schedule at 12:00 PM; "dinner" without a time → schedule at 6:00 PM. These are NEVER affected by when other tasks are due.
-
-DATE CONTEXT (CRITICAL):
-- The user's timezone is ${USER_TIMEZONE}.
-- "Now" in the user's timezone is: ${nowTz.toISOString()}.
-- Today (user timezone) is: ${todayIso}.
-- If the user references a weekday/date, plan for that referenced date — NOT today.
-- "this weekend" → nearest Saturday or Sunday; "this week" → any day Mon–Fri this week.
-- Bare times like "at 7" with evening context (dinner, bar, friends, night) → PM. With morning context (gym, run, work) → AM.
-
-PLANNING TARGET:
-- Target date for this plan: ${planning.iso} (${planning.label}). (Derived from: ${planning.source})
-
-ABSOLUTE RULES:
-1) Base the plan ONLY on what the user typed. Reflect their intent even if phrased casually.
-2) DO NOT add unrequested tasks (no shower, commute, stretching, prep unless asked).
-3) Respect ALL constraints the user mentions (deadlines, windows, times, "before X", "after Y").
-4) Use the user's own wording in detectedTasks and priorities (adapted to be readable).
-5) Return ONLY valid JSON. No markdown. No commentary outside JSON.
-6) detectedTasks: at least 1 item — what the user wants to do, extracted as short phrases.
-7) assumptions: list ALL inferred details (duration guesses, AM/PM assumptions, date interpretations). If casual language was interpreted, note it here.
-8) If you need to pick a duration and the user didn't specify, choose a realistic default and log it in assumptions.
-
-DATE RULES:
-- Future date/weekday → schedule MUST be anchored to that date, not today.
-- Add an assumption line: "Planning date resolved as ${planning.iso} (${planning.label}, ${USER_TIMEZONE})".
-
-Return JSON matching this EXACT schema:
-
-{
-  "detectedTasks": string[],
-  "assumptions": string[],
-  "priorities": string[],
-  "schedule": { "time": string, "plan": string[] }[],
-  "habit": { "title": string, "why": string, "how": string },
-  "coach": string,
-  "personalInsight": string,
-  "streak": number,
-  "profile": {
-    "summary": string,
-    "doMore": string[],
-    "doLess": string[],
-    "risk": string
-  } | null
-}
-
-NOTES:
-- schedule.time: use readable buckets like "MORNING", "AFTERNOON", "EVENING" or exact times like "7:00 AM".
-- coach: short, punchy, motivational, directly relevant to what they're doing.
-- personalInsight: 1–2 sentences tied to the actual activity, not generic.
-- streak: 1 for now.
-${preferenceContext ? `\nUSER PREFERENCES (learned from past sessions — follow these closely):\n${preferenceContext}` : ""}
-${recentHistory ? `\nUSER'S RECENT PLANNING HISTORY (last 5 sessions — use to personalize, detect patterns, avoid repetition):\n${recentHistory}` : ""}
-`;
-
-    // ── Pre-resolve all date references in the input so the AI gets exact ISO dates ──
-    // This prevents the AI from anchoring all events to the primary planning date.
-    // We resolve: today, tomorrow, tonight, and every weekday name mentioned.
+    // ── Pre-resolve all date references so the AI gets exact ISO dates ──────────────
     const tomorrowIso = (() => {
       const d = new Date(nowTz);
       d.setDate(d.getDate() + 1);
@@ -683,7 +572,6 @@ ${recentHistory ? `\nUSER'S RECENT PLANNING HISTORY (last 5 sessions — use to 
     const resolvedDates: string[] = [];
     const inputLowerForDates = input.toLowerCase();
 
-    // Resolve every weekday name mentioned in the input
     for (let i = 0; i < weekdayNamesForResolution.length; i++) {
       const name = weekdayNamesForResolution[i];
       const short = name.slice(0, 3);
@@ -692,8 +580,6 @@ ${recentHistory ? `\nUSER'S RECENT PLANNING HISTORY (last 5 sessions — use to 
         resolvedDates.push(`"${name}" = ${iso}`);
       }
     }
-
-    // Add today/tomorrow/tonight mappings
     if (/\b(today|tonight|this morning|this afternoon|this evening)\b/i.test(input)) {
       resolvedDates.push(`"today/tonight" = ${todayIso}`);
     }
@@ -702,58 +588,200 @@ ${recentHistory ? `\nUSER'S RECENT PLANNING HISTORY (last 5 sessions — use to 
     }
 
     const dateMapSection = resolvedDates.length > 0
-      ? `\nDATE MAP — use these exact ISO dates for each day reference, do NOT put multiple events on the same date unless the user explicitly said so:\n${resolvedDates.join("\n")}\n`
+      ? `DATE MAP (use these exact ISO dates — do NOT collapse multiple events onto one date):\n${resolvedDates.join("\n")}`
       : "";
 
-    const userPrompt = `
-USER INPUT (may be casual, abbreviated, or imperfect — interpret generously):
-"${input}"
+    // ── STEP 1: Intent extraction (fast, low-temp) ────────────────────────────────
+    // Ask the model to identify every event in plain language — no date maths yet.
+    // This separates "what did the user mean?" from "when exactly?"
+    const extractionSystem = `You are a calendar event extractor. Your only job is to identify every distinct event in the user's message and extract the raw scheduling information.
 
-Primary planning date: ${planning.iso}
-Today: ${todayIso}
-Tomorrow: ${tomorrowIso}
-${dateMapSection}
-CRITICAL: Each event must be scheduled on its OWN correct date from the DATE MAP above. "Flight Friday at 6am" goes on Friday's date. "Pack tomorrow night" goes on tomorrow's date. Do NOT put all events on the same date.
+Return a JSON object:
+{
+  "events": [
+    {
+      "what": string,        // event title in user's own words
+      "when_raw": string,    // verbatim day/time reference from user ("tomorrow night", "Friday at 6am", "this aft")
+      "duration_raw": string, // verbatim duration ("2 hours", "30 min", "~1hr", "" if not mentioned)
+      "notes": string        // any extra context ("before work", "with Sarah", "deadline = cutoff not start time")
+    }
+  ],
+  "language": string         // detected language code, e.g. "en", "fr", "es"
+}
 
-Interpret the input as a real person casually describing their plans. Extract what they want to do, when, and for how long — even if phrased informally. Create a plan that reflects ONLY their stated intent.
+RULES:
+- Extract ALL distinct events, even if casually mentioned
+- Preserve the user's exact wording for when_raw and duration_raw — do NOT interpret yet
+- "due at midnight" → notes: "midnight is a deadline, NOT a start time. Schedule work beforehand."
+- Emojis count: 💪=gym, ☕=coffee, ✈️=flight, 📚=study
+- Multi-language inputs are valid — detect language and extract all events
+- Return ONLY valid JSON. No markdown.`;
+
+    const extractionUserPrompt = `User input: "${input}"`;
+
+    let extractedEvents: Array<{ what: string; when_raw: string; duration_raw: string; notes: string }> = [];
+    let detectedLanguage = "en";
+
+    try {
+      const extractionResult = await withTimeout(
+        client.chat.completions.create({
+          model: DEFAULT_MODEL,
+          temperature: 0.1,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: extractionSystem },
+            { role: "user", content: extractionUserPrompt },
+          ],
+        }),
+        10000
+      );
+      const extractedRaw = safeJsonParse(extractionResult.choices?.[0]?.message?.content ?? "{}");
+      extractedEvents = Array.isArray(extractedRaw?.events) ? extractedRaw.events : [];
+      detectedLanguage = typeof extractedRaw?.language === "string" ? extractedRaw.language : "en";
+    } catch {
+      // Step 1 failure is non-fatal — Step 2 will still work from raw input
+    }
+
+    // ── FEW-SHOT EXAMPLES ─────────────────────────────────────────────────────────
+    const FEW_SHOT_EXAMPLES = `
+WORKED EXAMPLES (study these carefully):
+
+Example 1:
+Input: "Flight Friday at 6am, need to pack tomorrow night"
+Today=Wednesday(2025-01-15), Tomorrow=2025-01-16, Friday=2025-01-17
+→ schedule: [{ time:"6:00 AM", plan:["Flight"] }] on 2025-01-17, [{ time:"8:00 PM", plan:["Pack"] }] on 2025-01-16
+RULE: "tomorrow" and "Friday" are DIFFERENT dates. Never collapse them.
+
+Example 2:
+Input: "dentist tmrw at half 3, then dinner w/ sarah fri 7ish"
+Today=Wednesday, Tomorrow=2025-01-16, Friday=2025-01-17
+→ Dentist on 2025-01-16 at 3:30 PM (90 min). Dinner with Sarah on 2025-01-17 at 7:00 PM (2 hrs).
+
+Example 3:
+Input: "essay due at midnight"
+Today=2025-01-15
+→ Essay work block on 2025-01-15, schedule 2:00 PM–6:00 PM. NEVER at 12:00 AM. Midnight = deadline cutoff.
+
+Example 4:
+Input: "💪 tmrw 7am"
+→ Gym/Workout tomorrow at 7:00 AM (60 min default).
+
+Example 5:
+Input: "mañana gym a las 8, cenar con familia 8pm"
+→ Gym tomorrow at 8:00 AM. Family dinner tomorrow at 8:00 PM. Respond in Spanish.
+
+Example 6:
+Input: "meeting w/ sarah mon 2pm for like an hour, study sesh tonight 2 hrs"
+Today=Friday, Monday=next Monday's date, Tonight=today's date
+→ Meeting with Sarah on Monday at 2:00 PM (60 min). Study session tonight at 8:00 PM (2 hrs).
+
+Example 7:
+Input: "gonna grab sushi w/ friends fri night ~7ish"
+→ Dinner (sushi with friends) on Friday at 7:00 PM (~2 hrs). "gonna grab" = casual = dinner.
 `;
 
-// Use Chat Completions API exclusively for maximum reliability across all SDK versions
-let raw: any;
-try {
-  const cc = await withTimeout(
-    client.chat.completions.create({
-      model: DEFAULT_MODEL,
-      temperature: 0.7,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-    }),
-    25000
-  );
+    // ── STEP 2: Full plan generation ──────────────────────────────────────────────
+    const systemPrompt = `You are LifeOS, a calendar scheduling engine. You receive pre-extracted event data and raw user input, and produce a structured schedule.
 
-  const text = cc.choices?.[0]?.message?.content ?? "{}";
-  raw = safeJsonParse(text);
-} catch (apiError: any) {
-  // Detailed error logging for debugging
-  console.error("OpenAI API Error:", {
-    message: apiError?.message,
-    status: apiError?.status,
-    type: apiError?.type,
-    model: DEFAULT_MODEL,
-  });
-  
-  // Return a user-friendly error
-  return NextResponse.json(
-    { 
-      error: `AI service error: ${apiError?.message || "Unknown error"}. Please try again.`,
-      details: apiError?.message 
-    },
-    { status: 500 }
-  );
+IDENTITY: You understand how REAL PEOPLE talk — slang, abbreviations, any language, mixed languages, emojis, voice-to-text artifacts.
+
+LANGUAGE: Detect the user's language (provided below). Return "coach", "habit", "personalInsight" in that language. JSON keys always in English.
+
+EMOJI HINTS: 💪🏋️=gym, ☕=coffee(30min), 🍕🍔=meal(60min), 📚✏️=study, 🏃🚴🧘=exercise, 💊🏥=appointment, ✈️=flight, 🎮=gaming, 🎵=music.
+
+CRITICAL DATE RULES:
+1. Each event goes on its OWN date from the DATE MAP. NEVER collapse multiple events onto one date.
+2. "tomorrow" ≠ any weekday. They are independent dates.
+3. Midnight = deadline cutoff. NEVER schedule work at 12:00 AM. Schedule the work block in the afternoon/evening before.
+4. Lunch → 12:00 PM. Dinner → 6:00 PM. These don't shift for deadlines.
+5. Future weekday reference → schedule on that weekday, NOT today.
+6. Bare "at 7" → PM if evening context, AM if morning context.
+
+DURATION DEFAULTS (when not specified):
+gym/workout=60min, run=45min, coffee=30min, meeting=60min, dinner=90min, lunch=60min, study=90min, dentist=60min, flight=use stated time only, packing=60min.
+
+ABBREVIATIONS: tmrw=tomorrow, w/=with, b4=before, sesh=session, fam=family, aft=afternoon, eve=evening, ~X=approximately X, Xish=approximately X, half N=N:30, 15 Uhr=3PM.
+
+DO NOT invent events not mentioned. DO NOT add commute/shower/prep unless asked.
+
+CONFIDENCE: After generating the plan, assess your confidence (0.0–1.0) and list any ambiguities you had to guess at.
+
+${FEW_SHOT_EXAMPLES}
+
+DATE CONTEXT:
+Timezone: ${USER_TIMEZONE}
+Now: ${nowTz.toISOString()}
+Today: ${todayIso}
+Tomorrow: ${tomorrowIso}
+Primary planning date: ${planning.iso} (${planning.label})
+${dateMapSection}
+
+${preferenceContext ? `USER PREFERENCES (learned — follow these):\n${preferenceContext}` : ""}
+${smartProfile ? `\n${smartProfile}` : ""}
+${recentHistory ? `\nRECENT HISTORY (last 5 sessions — personalise, avoid repetition):\n${recentHistory}` : ""}
+
+Return JSON matching this EXACT schema (no extra keys, no markdown):
+{
+  "detectedTasks": string[],
+  "assumptions": string[],
+  "priorities": string[],
+  "schedule": [{ "time": string, "plan": string[] }],
+  "habit": { "title": string, "why": string, "how": string },
+  "coach": string,
+  "personalInsight": string,
+  "streak": number,
+  "confidence": number,
+  "ambiguities": string[],
+  "profile": null
 }
+
+schedule.time: exact clock time ("7:00 AM") or bucket ("MORNING"). Each entry = one event.
+coach: short, punchy, relevant to their actual activity.
+personalInsight: 1–2 sentences tied to what they're doing.
+confidence: 0.0–1.0 (1.0 = certain, 0.6 = guessed something, 0.3 = multiple ambiguities).
+ambiguities: list anything you had to guess (AM/PM, duration, which date). Empty array if none.`;
+
+    const userPrompt = `USER INPUT: "${input}"
+
+${extractedEvents.length > 0 ? `PRE-EXTRACTED EVENTS (from Step 1 — use these as a guide, verify against raw input):
+${JSON.stringify(extractedEvents, null, 2)}` : ""}
+
+Detected language: ${detectedLanguage}
+
+CRITICAL: ${dateMapSection ? `Use the DATE MAP above. Each event gets its own date.` : `Today is ${todayIso}.`} Do NOT put all events on the same date. "Pack tomorrow night" is tomorrow (${tomorrowIso}), not Friday (${planning.iso}).`;
+
+    let raw: any;
+    try {
+      const cc = await withTimeout(
+        client.chat.completions.create({
+          model: DEFAULT_MODEL,
+          temperature: 0.3,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+        }),
+        25000
+      );
+
+      const text = cc.choices?.[0]?.message?.content ?? "{}";
+      raw = safeJsonParse(text);
+    } catch (apiError: any) {
+      console.error("OpenAI API Error:", {
+        message: apiError?.message,
+        status: apiError?.status,
+        type: apiError?.type,
+        model: DEFAULT_MODEL,
+      });
+      return NextResponse.json(
+        {
+          error: `AI service error: ${apiError?.message || "Unknown error"}. Please try again.`,
+          details: apiError?.message,
+        },
+        { status: 500 }
+      );
+    }
 
     // Basic shape validation + gentle fallback defaults
     const plan: Plan = {
@@ -765,10 +793,12 @@ assumptions: Array.isArray(raw?.assumptions) ? raw.assumptions : [],
         raw?.habit && typeof raw.habit === "object"
           ? raw.habit
           : { title: "Tiny habit", why: "Build momentum.", how: "Do it for 2 minutes." },
-      coach: typeof raw?.coach === "string" ? raw.coach : "You’ve got this.",
+      coach: typeof raw?.coach === "string" ? raw.coach : "You've got this.",
       personalInsight:
         typeof raw?.personalInsight === "string" ? raw.personalInsight : "",
       streak: typeof raw?.streak === "number" ? raw.streak : 1,
+      confidence: typeof raw?.confidence === "number" ? Math.min(1, Math.max(0, raw.confidence)) : undefined,
+      ambiguities: Array.isArray(raw?.ambiguities) ? raw.ambiguities.filter((x: any) => typeof x === "string") : [],
       profile:
         raw?.profile && typeof raw.profile === "object" ? raw.profile : null,
     };

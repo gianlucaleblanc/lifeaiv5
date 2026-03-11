@@ -33,6 +33,12 @@ import {
   type FeedbackEntry,
   type UserPreferences,
 } from "./lib/storage-sync";
+import { fullyPreprocess } from "./lib/nlp-preprocess";
+import {
+  loadSmartProfile,
+  rebuildAndSaveSmartProfile,
+  formatSmartProfileForPrompt,
+} from "./lib/user-learning-profile";
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -3129,6 +3135,28 @@ export default function GeneratePage() {
     }
   }
 
+  function getSmartProfileString(): string {
+    try {
+      const profile = loadSmartProfile();
+      return formatSmartProfileForPrompt(profile);
+    } catch {
+      return "";
+    }
+  }
+
+  /** After each successful plan, rebuild the smart profile from full history */
+  function maybeRebuildSmartProfile() {
+    try {
+      const history = loadHistory();
+      const onboarding = loadOnboardingProfile();
+      rebuildAndSaveSmartProfile(
+        history,
+        onboarding?.wakeHour ?? null,
+        onboarding?.sleepHour ?? null,
+      );
+    } catch { /* non-blocking */ }
+  }
+
   // ── Day Plan: builds a rich natural language input from modal prefs ──
   function buildDayPlanInput(p: typeof dayPlanPrefs): string {
     const wakeMap: Record<string, string> = { early: "6am", morning: "8am", late: "10am" };
@@ -3169,10 +3197,11 @@ export default function GeneratePage() {
       const res = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: richInput, preferenceContext: getPreferenceContext(), timezone: getUserTimezone(), recentHistory: getRecentHistoryContext() }),
+        body: JSON.stringify({ input: richInput, preferenceContext: getPreferenceContext(), timezone: getUserTimezone(), recentHistory: getRecentHistoryContext(), smartProfile: getSmartProfileString() }),
       });
       const data = (await res.json()) as Plan & { error?: string };
       if (!res.ok) throw new Error((data as any)?.error ?? "Request failed");
+      maybeRebuildSmartProfile();
       const item: HistoryItem = {
         id: generateId(),
         createdAt: new Date().toISOString(),
@@ -3963,6 +3992,8 @@ export default function GeneratePage() {
     // Normalize casual/abbreviated input BEFORE any parsing or API call.
     // This converts "tmrw", "gonna", "p.m.", "w/" etc. into clean equivalents.
     const normalizedInput = normalizeInput(input);
+    // Deep-clean slang/abbreviations before routing or sending to API
+    const preprocessedInput = fullyPreprocess(normalizedInput);
     if (normalizedInput !== input) setInput(normalizedInput);
 
     // If a file is attached, route to syllabus upload with the current input as instructions
@@ -3976,8 +4007,8 @@ export default function GeneratePage() {
     }
 
     try {
-      // Use normalized input for all parsing (normalizeInput() already ran above)
-      const ni = normalizedInput;
+      // Use preprocessed input for all parsing — slang has been expanded
+      const ni = preprocessedInput;
 
       // ── Natural language mutation detection ──
       // "move my 3pm meeting to 4pm", "cancel yoga tomorrow", "push my run back 30 minutes"
@@ -4193,19 +4224,28 @@ export default function GeneratePage() {
         } // end !isNonCalendarActivity guard
       }
 
-      // Fall through to planning API — send normalized input
+      // Fall through to planning API — send preprocessed input + smart profile
       const res = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: ni, preferenceContext: getPreferenceContext(), timezone: getUserTimezone(), recentHistory: getRecentHistoryContext() }),
+        body: JSON.stringify({
+          input: ni,
+          preferenceContext: getPreferenceContext(),
+          timezone: getUserTimezone(),
+          recentHistory: getRecentHistoryContext(),
+          smartProfile: getSmartProfileString(),
+        }),
       });
 
-      const data = (await res.json()) as Plan & { error?: string };
+      const data = (await res.json()) as Plan & { error?: string; confidence?: number; ambiguities?: string[] };
 
       if (!res.ok) {
         const errorMsg = (data as any)?.error ?? "Request failed";
         throw new Error(errorMsg);
       }
+
+      // Rebuild smart profile in background after each successful plan
+      maybeRebuildSmartProfile();
 
       const item: HistoryItem = {
         id: generateId(),
@@ -6491,6 +6531,34 @@ export default function GeneratePage() {
                 })
               )}
             </div>
+
+            {/* Ambiguities banner — shown when confidence < 0.75 or ambiguities exist */}
+            {(() => {
+              const planData = pendingHistory?.plan as any;
+              const ambiguities: string[] = Array.isArray(planData?.ambiguities) ? planData.ambiguities.filter((s: any) => typeof s === "string" && s.trim()) : [];
+              const confidence: number | undefined = typeof planData?.confidence === "number" ? planData.confidence : undefined;
+              if (ambiguities.length === 0 && (confidence === undefined || confidence >= 0.8)) return null;
+              return (
+                <div className="mx-4 mb-3 mt-1 rounded-xl bg-amber-50 border border-amber-200/80 px-3.5 py-2.5">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 text-amber-500 flex-shrink-0">
+                      <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd"/>
+                    </svg>
+                    <span className="text-[11px] font-bold text-amber-700">
+                      {confidence !== undefined && confidence < 0.6 ? "Low confidence — please verify" : "I made some guesses"}
+                    </span>
+                  </div>
+                  {ambiguities.length > 0 && (
+                    <ul className="space-y-0.5">
+                      {ambiguities.slice(0, 4).map((a, idx) => (
+                        <li key={idx} className="text-[11px] text-amber-700/80 leading-snug">• {a}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="mt-1 text-[10px] text-amber-600/70">Tap the pencil icon on any block to correct date or time.</p>
+                </div>
+              );
+            })()}
 
             {/* Footer */}
             <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-black/[0.05]">
