@@ -20,14 +20,76 @@ async function captureServerEvent(event: string, properties: Record<string, any>
 
 // ── AI Provider: Claude (preferred) → GPT-4o (fallback) ──────────────────────
 const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
-const DEFAULT_MODEL = USE_CLAUDE
-  ? "claude-opus-4-6"
-  : (process.env.OPENAI_MODEL || "gpt-4o");
+const HAS_OPENAI_KEY = !!process.env.OPENAI_API_KEY;
+const CLAUDE_MODEL = "claude-opus-4-6";
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
+const DEFAULT_MODEL = USE_CLAUDE ? CLAUDE_MODEL : OPENAI_MODEL;
 
 const anthropic = USE_CLAUDE ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
-const openai    = USE_CLAUDE ? null : new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Always initialise OpenAI client if key is available (needed for runtime fallback)
+const openai = HAS_OPENAI_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 
-/** Unified messages.create() — same call shape regardless of provider */
+/** Returns true when an Anthropic error is due to billing/credit exhaustion */
+function isClaudeQuotaError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as any;
+  if (e.status === 402 || e.status === 529) return true;
+  const msg: string = (e.message ?? e.error?.message ?? "").toLowerCase();
+  return msg.includes("credit") || msg.includes("quota") || msg.includes("billing") ||
+    msg.includes("insufficient") || msg.includes("overloaded") ||
+    msg.includes("rate limit") || msg.includes("capacity");
+}
+
+/** Translate Anthropic-style params to OpenAI and return a normalised response */
+async function callOpenAICompat(params: {
+  max_tokens: number; temperature?: number;
+  system: string; messages: Array<{ role: "user" | "assistant"; content: string }>;
+  tools?: Anthropic.Tool[]; tool_choice?: any;
+}): Promise<any> {
+  if (!openai) throw new Error("OPENAI_API_KEY is not configured");
+  const oaiMessages: any[] = [
+    { role: "system", content: params.system },
+    ...params.messages,
+  ];
+  const hasTools = Array.isArray(params.tools) && params.tools.length > 0;
+  const oaiParams: any = {
+    model: OPENAI_MODEL,
+    max_tokens: params.max_tokens,
+    temperature: params.temperature ?? 0.3,
+    messages: oaiMessages,
+    ...(hasTools ? {
+      tools: params.tools!.map((t: Anthropic.Tool) => ({
+        type: "function" as const,
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: { ...(t.input_schema as any) },
+        },
+      })),
+      tool_choice: params.tool_choice?.name
+        ? { type: "function" as const, function: { name: params.tool_choice.name } }
+        : ("auto" as const),
+    } : {
+      response_format: { type: "json_object" as const },
+    }),
+  };
+  const res = await openai.chat.completions.create(oaiParams);
+  // Normalise to Anthropic response shape
+  const msg = res.choices?.[0]?.message;
+  const content: any[] = [];
+  if (msg?.content) content.push({ type: "text", text: msg.content });
+  if (msg?.tool_calls?.[0]) {
+    const tc = msg.tool_calls[0] as any;
+    let input: any = {};
+    try { input = JSON.parse(tc.function?.arguments ?? "{}"); } catch {}
+    content.push({ type: "tool_use", id: tc.id, name: tc.function?.name, input });
+  }
+  return { content };
+}
+
+/** Unified messages.create() — same call shape regardless of provider.
+ *  If Claude is configured but returns a quota/credit error at runtime,
+ *  automatically retries with GPT-4o so the user never sees a billing error. */
 const client = {
   messages: {
     async create(params: {
@@ -36,75 +98,74 @@ const client = {
       tools?: Anthropic.Tool[]; tool_choice?: any;
     }): Promise<any> {
       if (USE_CLAUDE && anthropic) {
-        return anthropic.messages.create(params as any);
+        try {
+          return await anthropic.messages.create(params as any);
+        } catch (err) {
+          if (isClaudeQuotaError(err) && HAS_OPENAI_KEY) {
+            console.warn("[plan/route] Claude quota error — falling back to GPT-4o", err);
+            return callOpenAICompat(params);
+          }
+          throw err;
+        }
       }
-      // OpenAI fallback — translate Anthropic params to OpenAI format
-      const oaiMessages: any[] = [
-        { role: "system", content: params.system },
-        ...params.messages,
-      ];
-      const hasTools = Array.isArray(params.tools) && params.tools.length > 0;
-      const oaiParams: any = {
-        model: DEFAULT_MODEL,
-        max_tokens: params.max_tokens,
-        temperature: params.temperature ?? 0.3,
-        messages: oaiMessages,
-        ...(hasTools ? {
-          tools: params.tools!.map((t: Anthropic.Tool) => ({
-            type: "function" as const,
-            function: {
-              name: t.name,
-              description: t.description,
-              parameters: { ...(t.input_schema as any) },
-            },
-          })),
-          tool_choice: params.tool_choice?.name
-            ? { type: "function" as const, function: { name: params.tool_choice.name } }
-            : ("auto" as const),
-        } : {
-          response_format: { type: "json_object" as const },
-        }),
-      };
-      const res = await openai!.chat.completions.create(oaiParams);
-      // Normalize OpenAI response to look like Anthropic's shape
-      const msg = res.choices?.[0]?.message;
-      const content: any[] = [];
-      if (msg?.content) content.push({ type: "text", text: msg.content });
-      if (msg?.tool_calls?.[0]) {
-        const tc = msg.tool_calls[0] as any;
-        let input: any = {};
-        try { input = JSON.parse(tc.function?.arguments ?? "{}"); } catch {}
-        content.push({ type: "tool_use", id: tc.id, name: tc.function?.name, input });
-      }
-      return { content };
+      return callOpenAICompat(params);
     },
 
     stream(params: {
       model: string; max_tokens: number; system: string;
       messages: Array<{ role: "user" | "assistant"; content: string }>;
     }) {
-      if (USE_CLAUDE && anthropic) return anthropic.messages.stream(params as any);
-      // OpenAI streaming — return an async iterable that emits Anthropic-shaped events
+      // Streaming: return an async iterable that yields Anthropic-shaped events.
+      // If Claude hits a quota error mid-stream we fall back to OpenAI.
+      if (USE_CLAUDE && anthropic) {
+        // Wrap in an async generator so we can catch the error and retry.
+        return (async function* () {
+          try {
+            const stream = anthropic!.messages.stream(params as any);
+            for await (const event of stream) {
+              yield event;
+            }
+          } catch (err) {
+            if (isClaudeQuotaError(err) && HAS_OPENAI_KEY && openai) {
+              console.warn("[plan/route] Claude quota error in stream — falling back to GPT-4o", err);
+              const oaiStream = await openai.chat.completions.create({
+                model: OPENAI_MODEL,
+                max_tokens: params.max_tokens,
+                stream: true,
+                messages: [
+                  { role: "system", content: params.system },
+                  ...params.messages,
+                ],
+              });
+              for await (const chunk of oaiStream) {
+                const delta = chunk.choices?.[0]?.delta?.content ?? "";
+                if (delta) {
+                  yield { type: "content_block_delta", delta: { type: "text_delta", text: delta } };
+                }
+              }
+            } else {
+              throw err;
+            }
+          }
+        })();
+      }
+      // OpenAI streaming path
       const oaiMessages: any[] = [
         { role: "system", content: params.system },
         ...params.messages,
       ];
       const streamPromise = openai!.chat.completions.create({
-        model: DEFAULT_MODEL,
+        model: OPENAI_MODEL,
         max_tokens: params.max_tokens,
         stream: true,
         messages: oaiMessages,
       });
-      // Return an async iterable that yields Anthropic-shaped content_block_delta events
       return (async function* () {
         const stream = await streamPromise;
         for await (const chunk of stream) {
           const delta = chunk.choices?.[0]?.delta?.content ?? "";
           if (delta) {
-            yield {
-              type: "content_block_delta",
-              delta: { type: "text_delta", text: delta },
-            };
+            yield { type: "content_block_delta", delta: { type: "text_delta", text: delta } };
           }
         }
       })();

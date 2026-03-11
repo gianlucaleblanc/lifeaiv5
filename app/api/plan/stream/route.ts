@@ -23,11 +23,26 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 
 const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
+const HAS_OPENAI_KEY = !!process.env.OPENAI_API_KEY;
 const DEFAULT_TIMEZONE = "America/New_York";
-const DEFAULT_MODEL = USE_CLAUDE ? "claude-opus-4-6" : (process.env.OPENAI_MODEL || "gpt-4o");
+const CLAUDE_MODEL = "claude-opus-4-6";
+const OPENAI_MODEL_NAME = process.env.OPENAI_MODEL || "gpt-4o";
+const DEFAULT_MODEL = USE_CLAUDE ? CLAUDE_MODEL : OPENAI_MODEL_NAME;
 
 const anthropic = USE_CLAUDE ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
-const openaiClient = USE_CLAUDE ? null : new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Always init OpenAI if key present — needed for runtime fallback even when Claude is primary
+const openaiClient = HAS_OPENAI_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+
+/** Returns true when an Anthropic error is a billing/credit exhaustion error */
+function isClaudeQuotaError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as any;
+  if (e.status === 402 || e.status === 529) return true;
+  const msg: string = (e.message ?? e.error?.message ?? "").toLowerCase();
+  return msg.includes("credit") || msg.includes("quota") || msg.includes("billing") ||
+    msg.includes("insufficient") || msg.includes("overloaded") ||
+    msg.includes("rate limit") || msg.includes("capacity");
+}
 
 // ── Shared utilities (duplicated from route.ts to keep files independent) ──────
 
@@ -198,23 +213,40 @@ ${dateMapSection ? `\nCRITICAL: Use DATE MAP above. Every event on its own date.
         const coachSystem = `${STATIC_SYSTEM}\n\n${DYNAMIC_CONTEXT}`;
 
         let coachText = "";
+        let useOpenAIFallback = false; // set to true if Claude quota error hit
 
         if (USE_CLAUDE && anthropic) {
-          const coachStream = anthropic.messages.stream({
-            model: DEFAULT_MODEL,
-            max_tokens: 100,
-            system: coachSystem,
-            messages: [{ role: "user", content: coachUserMsg }],
-          });
-          for await (const event of coachStream) {
-            if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
-              const delta = event.delta.text ?? "";
-              if (delta) { coachText += delta; enqueue({ type: "coach", delta }); }
+          try {
+            const coachStream = anthropic.messages.stream({
+              model: CLAUDE_MODEL,
+              max_tokens: 100,
+              system: coachSystem,
+              messages: [{ role: "user", content: coachUserMsg }],
+            });
+            for await (const event of coachStream) {
+              if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+                const delta = event.delta.text ?? "";
+                if (delta) { coachText += delta; enqueue({ type: "coach", delta }); }
+              }
             }
+          } catch (err) {
+            if (isClaudeQuotaError(err) && openaiClient) {
+              console.warn("[plan/stream] Claude quota error in coach stream — falling back to GPT-4o", err);
+              useOpenAIFallback = true;
+              coachText = ""; // reset so we stream fresh from OpenAI
+              const coachStream = await openaiClient.chat.completions.create({
+                model: OPENAI_MODEL_NAME, max_tokens: 100, stream: true,
+                messages: [{ role: "system", content: coachSystem }, { role: "user", content: coachUserMsg }],
+              });
+              for await (const chunk of coachStream) {
+                const delta = chunk.choices?.[0]?.delta?.content ?? "";
+                if (delta) { coachText += delta; enqueue({ type: "coach", delta }); }
+              }
+            } else { throw err; }
           }
         } else if (openaiClient) {
           const coachStream = await openaiClient.chat.completions.create({
-            model: DEFAULT_MODEL, max_tokens: 100, stream: true,
+            model: OPENAI_MODEL_NAME, max_tokens: 100, stream: true,
             messages: [{ role: "system", content: coachSystem }, { role: "user", content: coachUserMsg }],
           });
           for await (const chunk of coachStream) {
@@ -265,24 +297,8 @@ ${dateMapSection ? `\nCRITICAL: Use DATE MAP above. Every event on its own date.
 
         let raw: any;
 
-        if (USE_CLAUDE && anthropic) {
-          const planCall = await anthropic.messages.create({
-            model: DEFAULT_MODEL,
-            max_tokens: 4096,
-            temperature: 1,
-            tool_choice: { type: "tool", name: "create_plan" },
-            tools: [planTool],
-            system: `${STATIC_SYSTEM}\n\n${DYNAMIC_CONTEXT}`,
-            messages: [{ role: "user", content: userPrompt }],
-          });
-          const toolUseBlock = planCall.content?.find((b: any) => b.type === "tool_use") as any;
-          if (toolUseBlock?.input) {
-            raw = toolUseBlock.input;
-          } else {
-            const textBlock = planCall.content?.find((b: any) => b.type === "text") as any;
-            raw = safeJsonParse(textBlock?.text ?? "{}");
-          }
-        } else if (openaiClient) {
+        const callOpenAIPlan = async () => {
+          if (!openaiClient) throw new Error("OPENAI_API_KEY is not configured");
           const oaiTool: any = {
             type: "function",
             function: {
@@ -292,7 +308,7 @@ ${dateMapSection ? `\nCRITICAL: Use DATE MAP above. Every event on its own date.
             },
           };
           const planCall = await openaiClient.chat.completions.create({
-            model: DEFAULT_MODEL, max_tokens: 4096, temperature: 0.3,
+            model: OPENAI_MODEL_NAME, max_tokens: 4096, temperature: 0.3,
             tool_choice: { type: "function", function: { name: "create_plan" } },
             tools: [oaiTool],
             messages: [
@@ -302,10 +318,37 @@ ${dateMapSection ? `\nCRITICAL: Use DATE MAP above. Every event on its own date.
           });
           const tc = planCall.choices?.[0]?.message?.tool_calls?.[0] as any;
           if (tc?.function?.arguments) {
-            try { raw = JSON.parse(tc.function.arguments); } catch { raw = {}; }
-          } else {
-            raw = safeJsonParse(planCall.choices?.[0]?.message?.content ?? "{}");
+            try { return JSON.parse(tc.function.arguments); } catch { return {}; }
           }
+          return safeJsonParse(planCall.choices?.[0]?.message?.content ?? "{}");
+        };
+
+        if (USE_CLAUDE && anthropic && !useOpenAIFallback) {
+          try {
+            const planCall = await anthropic.messages.create({
+              model: CLAUDE_MODEL,
+              max_tokens: 4096,
+              temperature: 1,
+              tool_choice: { type: "tool", name: "create_plan" },
+              tools: [planTool],
+              system: `${STATIC_SYSTEM}\n\n${DYNAMIC_CONTEXT}`,
+              messages: [{ role: "user", content: userPrompt }],
+            });
+            const toolUseBlock = planCall.content?.find((b: any) => b.type === "tool_use") as any;
+            if (toolUseBlock?.input) {
+              raw = toolUseBlock.input;
+            } else {
+              const textBlock = planCall.content?.find((b: any) => b.type === "text") as any;
+              raw = safeJsonParse(textBlock?.text ?? "{}");
+            }
+          } catch (err) {
+            if (isClaudeQuotaError(err) && openaiClient) {
+              console.warn("[plan/stream] Claude quota error in plan call — falling back to GPT-4o", err);
+              raw = await callOpenAIPlan();
+            } else { throw err; }
+          }
+        } else if (openaiClient) {
+          raw = await callOpenAIPlan();
         } else {
           throw new Error("No AI provider configured");
         }

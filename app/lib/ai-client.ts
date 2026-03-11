@@ -25,6 +25,29 @@ export const HAS_OPENAI = !!process.env.OPENAI_API_KEY;
 export const AI_PROVIDER: "claude" | "openai" = HAS_CLAUDE ? "claude" : "openai";
 export const AI_MODEL = HAS_CLAUDE ? "claude-opus-4-6" : (process.env.OPENAI_MODEL || "gpt-4o");
 
+// ── Quota / credit error detection ──────────────────────────────────────────
+
+/**
+ * Returns true if the error is an Anthropic billing/quota/credit error.
+ * These are HTTP 529 (overloaded), 402 (payment required), or 400/401
+ * errors whose message contains credit/quota keywords.
+ */
+function isClaudeQuotaError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as any;
+  // Anthropic SDK surfaces status as e.status
+  if (e.status === 402) return true;   // Payment Required (out of credits)
+  if (e.status === 529) return true;   // Anthropic overload / credit exhausted
+  // Some versions surface a nested error object
+  const msg: string = (e.message ?? e.error?.message ?? "").toLowerCase();
+  if (msg.includes("credit") || msg.includes("quota") || msg.includes("billing") ||
+      msg.includes("insufficient") || msg.includes("overloaded") ||
+      msg.includes("rate limit") || msg.includes("capacity")) {
+    return true;
+  }
+  return false;
+}
+
 // ── Lazy client singletons ──────────────────────────────────────────────────
 
 let _anthropic: Anthropic | null = null;
@@ -66,16 +89,26 @@ export interface CallAIResult {
 
 /**
  * Make a single AI call. Returns { text, toolInput? }.
- * Automatically uses Claude if ANTHROPIC_API_KEY is set, otherwise GPT-4o.
+ * Prefers Claude when ANTHROPIC_API_KEY is set.
+ * If Claude returns a quota/credit error at runtime, automatically retries
+ * with GPT-4o so the user never sees a billing error.
  */
 export async function callAI(opts: CallAIOptions): Promise<CallAIResult> {
   const { system, userMessage, maxTokens = 2048, temperature, tool } = opts;
 
   if (AI_PROVIDER === "claude") {
-    return _callClaude({ system, userMessage, maxTokens, temperature, tool });
-  } else {
-    return _callOpenAI({ system, userMessage, maxTokens, temperature, tool });
+    try {
+      return await _callClaude({ system, userMessage, maxTokens, temperature, tool });
+    } catch (err) {
+      if (isClaudeQuotaError(err) && HAS_OPENAI) {
+        console.warn("[ai-client] Claude quota/credit error — falling back to GPT-4o", err);
+        return _callOpenAI({ system, userMessage, maxTokens, temperature, tool });
+      }
+      throw err;
+    }
   }
+
+  return _callOpenAI({ system, userMessage, maxTokens, temperature, tool });
 }
 
 // ── Claude implementation ───────────────────────────────────────────────────
@@ -210,31 +243,15 @@ export interface StreamAIOptions {
 /**
  * Stream a text response, calling onDelta for each token.
  * Returns the full accumulated text when complete.
+ * If Claude hits a quota/credit error, falls back to GPT-4o streaming.
  */
 export async function streamAI(opts: StreamAIOptions): Promise<string> {
   const { system, userMessage, maxTokens = 200, onDelta } = opts;
 
-  if (AI_PROVIDER === "claude") {
-    const client = getAnthropic();
-    const stream = client.messages.stream({
-      model: AI_MODEL,
-      max_tokens: maxTokens,
-      system,
-      messages: [{ role: "user", content: userMessage }],
-    });
-
-    let full = "";
-    for await (const event of stream) {
-      if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
-        const delta = event.delta.text ?? "";
-        if (delta) { full += delta; onDelta(delta); }
-      }
-    }
-    return full;
-  } else {
+  async function streamOpenAI(): Promise<string> {
     const client = getOpenAI();
     const stream = await client.chat.completions.create({
-      model: AI_MODEL,
+      model: process.env.OPENAI_MODEL || "gpt-4o",
       max_tokens: maxTokens,
       stream: true,
       messages: [
@@ -242,7 +259,6 @@ export async function streamAI(opts: StreamAIOptions): Promise<string> {
         { role: "user", content: userMessage },
       ],
     });
-
     let full = "";
     for await (const chunk of stream) {
       const delta = chunk.choices?.[0]?.delta?.content ?? "";
@@ -250,4 +266,33 @@ export async function streamAI(opts: StreamAIOptions): Promise<string> {
     }
     return full;
   }
+
+  if (AI_PROVIDER === "claude") {
+    try {
+      const client = getAnthropic();
+      const stream = client.messages.stream({
+        model: AI_MODEL,
+        max_tokens: maxTokens,
+        system,
+        messages: [{ role: "user", content: userMessage }],
+      });
+
+      let full = "";
+      for await (const event of stream) {
+        if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+          const delta = event.delta.text ?? "";
+          if (delta) { full += delta; onDelta(delta); }
+        }
+      }
+      return full;
+    } catch (err) {
+      if (isClaudeQuotaError(err) && HAS_OPENAI) {
+        console.warn("[ai-client] Claude quota/credit error in streamAI — falling back to GPT-4o", err);
+        return streamOpenAI();
+      }
+      throw err;
+    }
+  }
+
+  return streamOpenAI();
 }
