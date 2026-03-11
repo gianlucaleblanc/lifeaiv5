@@ -775,13 +775,58 @@ function addDaysISO(iso: string, days: number): string {
 
 function extractRelativeAnchoredTasks(input: string, now: Date): Array<{ title: string; date: string; atMin?: number; durationMin?: number }> {
   // Handles "tomorrow I have to run for 2 hours", "today workout", etc.
+  // IMPORTANT: resolve "tomorrow" and "today" independently of whether a weekday also exists
+  // in the input. E.g. "Flight Friday at 6am, need to pack tomorrow night" — "tomorrow" must
+  // resolve to tomorrow's ISO date, not today, even though "Friday" is also present.
   const out: Array<{ title: string; date: string; atMin?: number; durationMin?: number }> = [];
+
+  const tomorrowIso = isoDateLocal(addDays(now, 1));
+  const todayIso = isoDateLocal(now);
+
+  // ── PASS 1: Explicit "tomorrow [night/evening/morning/...]" or "tomorrow [verb/activity]" ──
+  // This runs FIRST and is independent of whether a weekday is also mentioned.
+  // Matches: "pack tomorrow night", "tomorrow night pack", "need to pack tomorrow night",
+  //          "tomorrow morning workout", etc.
+  const tomorrowActivityRe = /\b(?:(?:need\s+to\s+|have\s+to\s+|gotta\s+|going\s+to\s+)?(?:pack|packing|prepare|prep|travel|get\s+ready|cook|grocery|groceries|errands?|study|homework|assignment|essay|paper|project|run|workout|gym|lift|call|appointment|meeting|rehearsal|practice|clean|cleaning)\b[^\n\.]{0,80}?\btomorrow\b|tomorrow\b[^\n\.]{0,80}?\b(?:pack|packing|prepare|prep|travel|get\s+ready|cook|grocery|groceries|errands?|study|homework|assignment|essay|paper|project|run|workout|gym|lift|call|appointment|meeting|rehearsal|practice|clean|cleaning)\b)/gi;
+  let m: RegExpExecArray | null;
+  const addedTitles = new Set<string>();
+
+  while ((m = tomorrowActivityRe.exec(input)) !== null) {
+    const chunk = m[0];
+    // Extract the activity keyword from the match
+    const actRe = /\b(pack|packing|prepare|prep|travel|get\s+ready|cook|grocery|groceries|errands?|study|homework|assignment|essay|paper|project|run|workout|gym|lift|call|appointment|meeting|rehearsal|practice|clean|cleaning)\b/i;
+    const actMatch = chunk.match(actRe);
+    if (!actMatch) continue;
+    let raw = actMatch[1];
+    let title = normalizeEventTitle(raw);
+    if (/^gym$/i.test(raw)) title = "Gym";
+    if (/^lift$/i.test(raw)) title = "Lift";
+    if (/^workout$/i.test(raw)) title = "Workout";
+    if (/^pack(ing)?$/i.test(raw)) title = "Pack";
+    if (!title || addedTitles.has(title.toLowerCase())) continue;
+    addedTitles.add(title.toLowerCase());
+
+    // Determine time-of-day window from "tomorrow night/evening/morning"
+    const todChunk = input.slice(Math.max(0, m.index - 20), m.index + chunk.length + 20);
+    const todMatch = todChunk.match(/\b(morning|afternoon|evening|night)\b/i);
+    let atMin: number | undefined;
+    if (todMatch) {
+      const w = timeOfDayWindow(todMatch[1]);
+      if (w) atMin = w.start + Math.floor((w.end - w.start) / 3); // pick a time within the window
+    }
+    const explicitTime = parseExplicitTimeToMins(chunk) ?? parseAmbiguousTimeToMins(chunk);
+    if (explicitTime !== null) atMin = explicitTime;
+
+    out.push({ title, date: tomorrowIso, atMin });
+  }
+
+  // ── PASS 2: General relative-day keyword extraction (original behaviour) ──
+  // Only runs if no weekday is present, to avoid baseDate confusion.
   const rel = resolveRelativeBaseDate(input, now);
   const baseDate = rel.date;
 
   // Look for common activities/errands in relative-day prompts.
-  const re = /\b(?:today|tomorrow|tonight)\b[^\n\.]{0,140}?\b(run|workout|gym|lift|study|homework|assignment|essay|paper|project|meeting|call|appointment|tour|museum|class|lecture|exam|quiz)\b([^\n\.]*)/gi;
-  let m: RegExpExecArray | null;
+  const re = /\b(?:today|tomorrow|tonight)\b[^\n\.]{0,140}?\b(run|workout|gym|lift|study|homework|assignment|essay|paper|project|meeting|call|appointment|tour|museum|class|lecture|exam|quiz|pack|packing|prepare|prep)\b([^\n\.]*)/gi;
   while ((m = re.exec(input)) !== null) {
     const raw = m[1] ?? "";
     const rest = String(m[2] ?? "");
@@ -789,6 +834,9 @@ function extractRelativeAnchoredTasks(input: string, now: Date): Array<{ title: 
     if (/^gym$/i.test(raw)) title = "Gym";
     if (/^lift$/i.test(raw)) title = "Lift";
     if (/^workout$/i.test(raw)) title = "Workout";
+    if (/^pack(ing)?$/i.test(raw)) title = "Pack";
+
+    if (addedTitles.has(title.toLowerCase())) continue; // already captured in PASS 1
 
     const whole = input.slice(m.index, Math.min(input.length, m.index + 200));
     const atMin =
@@ -802,14 +850,16 @@ function extractRelativeAnchoredTasks(input: string, now: Date): Array<{ title: 
     out.push({ title, date: baseDate, atMin: atMin ?? undefined, durationMin });
   }
 
-  // Handle patterns like "tomorrow I have to run for 2 hours" (no explicit verb capture above if punctuation differs)
-  const re2 = /\b(?:today|tomorrow|tonight)\b[^\n\.]{0,160}?\bto\s+(run|workout|study|lift)\b([^\n\.]*)/gi;
+  // Handle patterns like "tomorrow I have to run for 2 hours"
+  const re2 = /\b(?:today|tomorrow|tonight)\b[^\n\.]{0,160}?\bto\s+(run|workout|study|lift|pack|prepare)\b([^\n\.]*)/gi;
   while ((m = re2.exec(input)) !== null) {
     const raw = m[1] ?? "";
     const rest = String(m[2] ?? "");
     const whole = input.slice(m.index, Math.min(input.length, m.index + 200));
+    const title = normalizeEventTitle(raw);
+    if (addedTitles.has(title.toLowerCase())) continue;
     const durationMin = parseDurationToMins(rest) ?? parseDurationToMins(whole) ?? undefined;
-    out.push({ title: normalizeEventTitle(raw), date: baseDate, durationMin });
+    out.push({ title, date: baseDate, durationMin });
   }
 
   return out;
