@@ -138,6 +138,46 @@ function WaveformBars({ color = "var(--lifeos-pink)" }: { color?: string }) {
   );
 }
 
+// ── Rotating placeholder hook ─────────────────────────────────
+const PLACEHOLDER_EXAMPLES = [
+  "Essay due at midnight, gym at 7am, lunch and dinner…",
+  "Study for exam Friday, dentist Tuesday at 2pm…",
+  "Team meeting at 10, gym after work, make dinner…",
+  "3 assignments due this week, need to sleep by 11…",
+  "Flight Friday at 6am, pack tonight, dinner tomorrow…",
+];
+
+function useRotatingPlaceholder(interval = 3200) {
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setIdx((i) => (i + 1) % PLACEHOLDER_EXAMPLES.length), interval);
+    return () => clearInterval(t);
+  }, [interval]);
+  return PLACEHOLDER_EXAMPLES[idx];
+}
+
+// ── Streak display ─────────────────────────────────────────────
+function StreakBadge() {
+  const [streak, setStreak] = useState(0);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("openhour_streak_v1");
+      if (!raw) return;
+      const { count, lastDate } = JSON.parse(raw);
+      const today = new Date().toISOString().slice(0, 10);
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      if (lastDate === today || lastDate === yesterday) setStreak(count ?? 0);
+    } catch { /* ignore */ }
+  }, []);
+  if (streak < 2) return null;
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 border border-amber-200 px-3 py-1 text-xs font-bold text-amber-600">
+      <span>🔥</span>
+      <span>{streak} day streak</span>
+    </div>
+  );
+}
+
 // ── Typewriter text ───────────────────────────────────────────
 function TypewriterText({ text, color = "var(--lifeos-pink)" }: { text: string; color?: string }) {
   const [displayed, setDisplayed] = useState("");
@@ -2887,6 +2927,7 @@ function DayPlanModal({
 export default function GeneratePage() {
   const router = useRouter();
   const { toast } = useToast();
+  const rotatingPlaceholder = useRotatingPlaceholder();
 
   const [missingInfoOpen, setMissingInfoOpen] = useState(false);
   const [askTypeOpen, setAskTypeOpen] = useState(false);
@@ -4237,6 +4278,16 @@ export default function GeneratePage() {
     applyApprovedPlanBlocks(planPreview, approved);
     posthog.capture("AddToCalendar", { blocksAdded: approved.length });
 
+    // ── Update streak ──
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const raw = localStorage.getItem("openhour_streak_v1");
+      const prev = raw ? JSON.parse(raw) : { count: 0, lastDate: "" };
+      const newCount = prev.lastDate === yesterday ? prev.count + 1 : prev.lastDate === today ? prev.count : 1;
+      localStorage.setItem("openhour_streak_v1", JSON.stringify({ count: newCount, lastDate: today }));
+    } catch { /* ignore */ }
+
     toast(`✓ ${approved.length} block${approved.length !== 1 ? "s" : ""} added to your calendar`, "success");
 
     setPlanPreview(null);
@@ -4693,7 +4744,7 @@ export default function GeneratePage() {
         className="inline-flex items-center gap-2 rounded-full border border-[var(--lifeos-pink)]/20 bg-[var(--lifeos-pink)]/6 px-4 py-1.5 mb-6"
       >
         <span className="h-1.5 w-1.5 rounded-full bg-[var(--lifeos-pink)] animate-pulse" />
-        <span className="text-xs font-semibold tracking-wide text-[var(--lifeos-pink)]">AI-powered scheduling</span>
+        <span className="text-xs font-semibold tracking-wide text-[var(--lifeos-pink)]">Free · No download · Works in 10 seconds</span>
       </motion.div>
 
       {/* ── Hero headline ── */}
@@ -4701,22 +4752,50 @@ export default function GeneratePage() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: "easeOut", delay: 0.05 }}
-        className="text-5xl sm:text-[60px] xl:text-[68px] font-extrabold text-black leading-[1.02] max-w-[600px]"
+        className="text-5xl sm:text-[60px] xl:text-[68px] font-extrabold text-black leading-[1.02] max-w-[640px]"
         style={{ letterSpacing: "-0.04em" }}
       >
-        Tell me your day.
+        Type your day.
         <br />
-        <span style={{ color: "var(--lifeos-pink)" }}>I&apos;ll plan it.</span>
+        <span style={{ color: "var(--lifeos-pink)" }}>We schedule it.</span>
       </motion.h1>
 
       <motion.p
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: "easeOut", delay: 0.1 }}
-        className="mt-4 text-[15px] text-black/40 font-medium max-w-[360px] leading-relaxed"
+        className="mt-4 text-[15px] text-black/40 font-medium max-w-[400px] leading-relaxed"
       >
-        Just describe your day in plain English — classes, workouts, errands. The AI handles the rest.
+        Stop manually dragging events. Just describe what you have going on — assignments, gym, meals — and OpenHour builds your full schedule instantly.
       </motion.p>
+
+      {/* ── Social proof + streak ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: "easeOut", delay: 0.15 }}
+        className="mt-4 flex items-center gap-3 flex-wrap justify-center"
+      >
+        <div className="flex items-center gap-1.5 text-xs text-black/35 font-medium">
+          <span>⚡</span>
+          <span>No sign-up required</span>
+        </div>
+        <span className="text-black/15">·</span>
+        <div className="flex items-center gap-1.5 text-xs text-black/35 font-medium">
+          <span>📅</span>
+          <span>Adds to your calendar in seconds</span>
+        </div>
+        <span className="text-black/15">·</span>
+        <div className="flex items-center gap-1.5 text-xs text-black/35 font-medium">
+          <span>🤖</span>
+          <span>Powered by GPT-4o</span>
+        </div>
+      </motion.div>
+
+      {/* ── Streak badge ── */}
+      <div className="mt-3">
+        <StreakBadge />
+      </div>
 
       {/* ── Training badge — shows when user has given feedback ── */}
       {(feedbackSessions > 0 || pendingFeedback.length > 0) && (
@@ -4734,12 +4813,39 @@ export default function GeneratePage() {
         </div>
       )}
 
+      {/* ── Live demo chip — shows how it works before user types ── */}
+      {!input && !loading && !planPreview && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: "easeOut", delay: 0.22 }}
+          className="mt-6 flex flex-col items-center gap-2"
+        >
+          <p className="text-[11px] font-bold uppercase tracking-widest text-black/20">Try typing something like</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            {[
+              { label: "Essay due at midnight + gym", input: "Essay due at midnight, gym this morning, lunch and dinner" },
+              { label: "Plan my whole week", input: "Plan my week: study Monday, gym Tuesday Thursday, dentist Wednesday 2pm" },
+              { label: "Flight Friday", input: "Flight Friday at 6am, need to pack tomorrow night" },
+            ].map(({ label, input: chipInput }) => (
+              <button
+                key={label}
+                onClick={() => setInput(chipInput)}
+                className="rounded-full border border-black/[0.08] bg-white px-4 py-1.5 text-[12px] font-semibold text-black/50 hover:text-black/80 hover:border-[var(--lifeos-pink)]/40 hover:bg-[var(--lifeos-pink)]/[0.04] transition-all"
+              >
+                {label} →
+              </button>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
       {/* ── Input card ── */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: "easeOut", delay: 0.15 }}
-        className="mt-10 w-full max-w-xl"
+        className="mt-6 w-full max-w-xl"
       >
 
         {/* File chip (shown above card when attached) */}
@@ -4782,7 +4888,7 @@ export default function GeneratePage() {
             placeholder={
               pendingFile
                 ? `Instructions for ${pendingFile.name}… (optional)`
-                : "Study for 2 hours, gym at 6pm, dinner with friends at 8…"
+                : rotatingPlaceholder
             }
           />
 
