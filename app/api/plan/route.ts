@@ -680,75 +680,132 @@ Input: "gonna grab sushi w/ friends fri night ~7ish"
 → Dinner (sushi with friends) on Friday at 7:00 PM (~2 hrs). "gonna grab" = casual = dinner.
 `;
 
-    // ── STEP 2: Full plan generation ──────────────────────────────────────────────
-    const systemPrompt = `You are LifeOS, a calendar scheduling engine. You receive pre-extracted event data and raw user input, and produce a structured schedule.
+    // ── RAG: inject relevant past calendar events for consistency ─────────────────
+    const ragContext = (() => {
+      const cal: any[] = Array.isArray(body?.calendarContext) ? body.calendarContext : [];
+      if (!cal.length) return "";
+      // Extract keywords from input to find relevant past events
+      const words = input.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
+      const relevant = cal
+        .filter((b: any) => {
+          if (!b?.title) return false;
+          const t = b.title.toLowerCase();
+          return words.some((w) => t.includes(w));
+        })
+        .sort((a: any, b: any) => (b.date ?? "").localeCompare(a.date ?? ""))
+        .slice(0, 6);
+      if (!relevant.length) return "";
+      return `RELEVANT PAST EVENTS (use for scheduling consistency — e.g. if gym is always at 7 AM, keep that):
+${relevant.map((b: any) => `- ${b.title} on ${b.date} at ${Math.floor(b.startMin/60)}:${String(b.startMin%60).padStart(2,"0")}`).join("\n")}`;
+    })();
 
-IDENTITY: You understand how REAL PEOPLE talk — slang, abbreviations, any language, mixed languages, emojis, voice-to-text artifacts.
+    // ── STEP 2: Full plan via TOOL CALLING ────────────────────────────────────────
+    // Tool calling is more reliable than JSON prompting — the model is trained to
+    // fill tool parameters correctly and cannot deviate from the schema.
 
-LANGUAGE: Detect the user's language (provided below). Return "coach", "habit", "personalInsight" in that language. JSON keys always in English.
+    // ── STATIC system prompt (cacheable — doesn't change per-request) ─────────────
+    const STATIC_SYSTEM = `You are LifeOS — a scheduling engine that thinks like a brilliant personal assistant.
 
-EMOJI HINTS: 💪🏋️=gym, ☕=coffee(30min), 🍕🍔=meal(60min), 📚✏️=study, 🏃🚴🧘=exercise, 💊🏥=appointment, ✈️=flight, 🎮=gaming, 🎵=music.
+You never guess wrong about dates silently. You flag uncertainty rather than assume.
+You treat every input as if a real person typed it quickly on their phone.
+You understand slang, abbreviations, every language, mixed languages, emojis, voice-to-text.
 
-CRITICAL DATE RULES:
-1. Each event goes on its OWN date from the DATE MAP. NEVER collapse multiple events onto one date.
-2. "tomorrow" ≠ any weekday. They are independent dates.
-3. Midnight = deadline cutoff. NEVER schedule work at 12:00 AM. Schedule the work block in the afternoon/evening before.
-4. Lunch → 12:00 PM. Dinner → 6:00 PM. These don't shift for deadlines.
-5. Future weekday reference → schedule on that weekday, NOT today.
-6. Bare "at 7" → PM if evening context, AM if morning context.
+UNBREAKABLE RULES:
+• Each event gets its OWN date. NEVER collapse multiple day references onto one date.
+• "tomorrow" and any weekday are always different ISO dates.
+• Midnight = deadline cutoff. Schedule WORK before it, never AT 12:00 AM.
+• Only schedule what was asked. No invented commutes, showers, or prep.
+• Lunch defaults to 12:00 PM. Dinner to 6:00 PM. Deadlines don't shift meals.
+• "at 7" with evening context → 7 PM. With morning context → 7 AM.
 
-DURATION DEFAULTS (when not specified):
-gym/workout=60min, run=45min, coffee=30min, meeting=60min, dinner=90min, lunch=60min, study=90min, dentist=60min, flight=use stated time only, packing=60min.
+DURATION DEFAULTS: gym=60, run=45, coffee=30, meeting=60, dinner=90, lunch=60, study=90, dentist=60, packing=60.
 
-ABBREVIATIONS: tmrw=tomorrow, w/=with, b4=before, sesh=session, fam=family, aft=afternoon, eve=evening, ~X=approximately X, Xish=approximately X, half N=N:30, 15 Uhr=3PM.
+EMOJI MAP: 💪🏋️=gym, ☕=coffee(30m), 🍕🍔=meal(60m), 📚✏️=study, 🏃🚴🧘=exercise, 💊🏥=appointment, ✈️=flight, 🎮=gaming, 🎵=music.
 
-DO NOT invent events not mentioned. DO NOT add commute/shower/prep unless asked.
+ABBREV: tmrw=tomorrow, w/=with, b4=before, sesh=session, fam=family, aft=afternoon, eve=evening, ~X/Xish=approximately X, half N=N:30.
 
-CONFIDENCE: After generating the plan, assess your confidence (0.0–1.0) and list any ambiguities you had to guess at.
+LANGUAGE: Detect user language. Return coach/habit/personalInsight in that language. JSON keys always English.
 
-${FEW_SHOT_EXAMPLES}
+${FEW_SHOT_EXAMPLES}`;
 
-DATE CONTEXT:
-Timezone: ${USER_TIMEZONE}
-Now: ${nowTz.toISOString()}
-Today: ${todayIso}
-Tomorrow: ${tomorrowIso}
-Primary planning date: ${planning.iso} (${planning.label})
-${dateMapSection}
+    // ── DYNAMIC system context (changes per-request — not cached) ─────────────────
+    const DYNAMIC_CONTEXT = [
+      `DATE CONTEXT:`,
+      `Timezone: ${USER_TIMEZONE}`,
+      `Now: ${nowTz.toISOString()}`,
+      `Today: ${todayIso}  |  Tomorrow: ${tomorrowIso}`,
+      `Primary planning date: ${planning.iso} (${planning.label})`,
+      dateMapSection,
+      ragContext,
+      preferenceContext ? `USER PREFERENCES:\n${preferenceContext}` : "",
+      smartProfile,
+      recentHistory ? `RECENT HISTORY (last 5 — personalise, avoid repeating):\n${recentHistory}` : "",
+    ].filter(Boolean).join("\n\n");
 
-${preferenceContext ? `USER PREFERENCES (learned — follow these):\n${preferenceContext}` : ""}
-${smartProfile ? `\n${smartProfile}` : ""}
-${recentHistory ? `\nRECENT HISTORY (last 5 sessions — personalise, avoid repetition):\n${recentHistory}` : ""}
-
-Return JSON matching this EXACT schema (no extra keys, no markdown):
-{
-  "detectedTasks": string[],
-  "assumptions": string[],
-  "priorities": string[],
-  "schedule": [{ "time": string, "plan": string[] }],
-  "habit": { "title": string, "why": string, "how": string },
-  "coach": string,
-  "personalInsight": string,
-  "streak": number,
-  "confidence": number,
-  "ambiguities": string[],
-  "profile": null
-}
-
-schedule.time: exact clock time ("7:00 AM") or bucket ("MORNING"). Each entry = one event.
-coach: short, punchy, relevant to their actual activity.
-personalInsight: 1–2 sentences tied to what they're doing.
-confidence: 0.0–1.0 (1.0 = certain, 0.6 = guessed something, 0.3 = multiple ambiguities).
-ambiguities: list anything you had to guess (AM/PM, duration, which date). Empty array if none.`;
+    // ── Tool definition (schema-enforced — model cannot deviate) ──────────────────
+    const planTool: any = {
+      type: "function",
+      function: {
+        name: "create_plan",
+        description: "Create a structured daily plan and calendar schedule from natural language input",
+        parameters: {
+          type: "object",
+          properties: {
+            detectedTasks: {
+              type: "array", items: { type: "string" },
+              description: "Short phrases for each task/event the user mentioned"
+            },
+            assumptions: {
+              type: "array", items: { type: "string" },
+              description: "All inferred details: duration guesses, AM/PM choices, date interpretations"
+            },
+            priorities: {
+              type: "array", items: { type: "string" },
+              description: "Top 1-3 priorities for this plan"
+            },
+            schedule: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  time: { type: "string", description: "Clock time like '7:00 AM' or bucket like 'MORNING'" },
+                  plan: { type: "array", items: { type: "string" }, description: "Event titles for this time slot" }
+                },
+                required: ["time", "plan"]
+              },
+              description: "The full schedule — one entry per distinct event/time slot"
+            },
+            habit: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                why: { type: "string" },
+                how: { type: "string" }
+              },
+              required: ["title", "why", "how"],
+              description: "One small habit suggestion relevant to today's activities"
+            },
+            coach: { type: "string", description: "Short punchy motivational message, directly relevant to what they're doing" },
+            personalInsight: { type: "string", description: "1-2 sentences tied to their actual activity, not generic" },
+            streak: { type: "number", description: "Streak count — use 1" },
+            confidence: {
+              type: "number",
+              description: "0.0-1.0: how confident you are in the schedule. 1.0=certain, 0.6=guessed something, 0.3=multiple ambiguities"
+            },
+            ambiguities: {
+              type: "array", items: { type: "string" },
+              description: "Anything you had to guess: AM/PM choice, duration, which date, etc. Empty array if certain."
+            }
+          },
+          required: ["detectedTasks","assumptions","priorities","schedule","habit","coach","personalInsight","streak","confidence","ambiguities"]
+        }
+      }
+    };
 
     const userPrompt = `USER INPUT: "${input}"
-
-${extractedEvents.length > 0 ? `PRE-EXTRACTED EVENTS (from Step 1 — use these as a guide, verify against raw input):
-${JSON.stringify(extractedEvents, null, 2)}` : ""}
-
+${extractedEvents.length > 0 ? `\nPRE-EXTRACTED EVENTS (Step 1 guide — verify against raw input):\n${JSON.stringify(extractedEvents, null, 2)}` : ""}
 Detected language: ${detectedLanguage}
-
-CRITICAL: ${dateMapSection ? `Use the DATE MAP above. Each event gets its own date.` : `Today is ${todayIso}.`} Do NOT put all events on the same date. "Pack tomorrow night" is tomorrow (${tomorrowIso}), not Friday (${planning.iso}).`;
+CRITICAL: ${dateMapSection ? "Use DATE MAP above. Every event on its own date." : `Today is ${todayIso}.`} Do NOT collapse all events onto ${planning.iso}.`;
 
     let raw: any;
     try {
@@ -756,17 +813,26 @@ CRITICAL: ${dateMapSection ? `Use the DATE MAP above. Each event gets its own da
         client.chat.completions.create({
           model: DEFAULT_MODEL,
           temperature: 0.3,
-          response_format: { type: "json_object" },
+          tool_choice: { type: "function", function: { name: "create_plan" } },
+          tools: [planTool],
           messages: [
-            { role: "system", content: systemPrompt },
+            // Static prompt separated from dynamic context so caching applies to static part
+            { role: "system", content: STATIC_SYSTEM },
+            { role: "system", content: DYNAMIC_CONTEXT },
             { role: "user", content: userPrompt },
           ],
         }),
         25000
       );
 
-      const text = cc.choices?.[0]?.message?.content ?? "{}";
-      raw = safeJsonParse(text);
+      // Tool call response — parse from tool_calls, not message.content
+      const toolCall = cc.choices?.[0]?.message?.tool_calls?.[0] as any;
+      if (toolCall?.function?.arguments) {
+        raw = safeJsonParse(toolCall.function.arguments);
+      } else {
+        // Fallback: try content if tool call not present
+        raw = safeJsonParse(cc.choices?.[0]?.message?.content ?? "{}");
+      }
     } catch (apiError: any) {
       console.error("OpenAI API Error:", {
         message: apiError?.message,
@@ -781,6 +847,52 @@ CRITICAL: ${dateMapSection ? `Use the DATE MAP above. Each event gets its own da
         },
         { status: 500 }
       );
+    }
+
+    // ── STEP 3: Self-verification pass ────────────────────────────────────────────
+    // The model audits its own output for the most common error class: date collapse.
+    // Only runs when input mentions multiple distinct day references and confidence < 0.85.
+    const hasMultipleDayRefs = resolvedDates.length >= 2;
+    const shouldVerify = hasMultipleDayRefs && (typeof raw?.confidence !== "number" || raw.confidence < 0.85);
+
+    if (shouldVerify && Array.isArray(raw?.schedule) && raw.schedule.length > 0) {
+      try {
+        const verifySystem = `You are a calendar plan auditor. Check the generated schedule for errors.
+
+CHECKS:
+1. DATE COLLAPSE: If the user mentioned multiple distinct days (e.g. "tomorrow" AND "Friday"), are events actually on different ISO dates? The schedule.time field alone doesn't tell you the date — look at the assumptions for "Planning date resolved" lines.
+2. MIDNIGHT ERROR: Any event with a time between 12:00 AM and 1:00 AM when the user mentioned a "deadline" or "due at midnight"? That's wrong — it should be a work block earlier in the day.
+3. INVENTED EVENTS: Any events in the schedule not mentioned in the original input?
+
+${dateMapSection}
+
+Return JSON: { "approved": boolean, "errors": string[] }
+If no errors found, approved=true, errors=[].
+Be strict but fair — only flag real mistakes.`;
+
+        const verifyResult = await withTimeout(
+          client.chat.completions.create({
+            model: DEFAULT_MODEL,
+            temperature: 0.0,
+            response_format: { type: "json_object" },
+            messages: [
+              { role: "system", content: verifySystem },
+              { role: "user", content: `Original input: "${input}"\n\nGenerated plan:\n${JSON.stringify({ schedule: raw.schedule, assumptions: raw.assumptions }, null, 2)}` },
+            ],
+          }),
+          8000
+        );
+
+        const verifyRaw = safeJsonParse(verifyResult.choices?.[0]?.message?.content ?? "{}");
+        if (!verifyRaw?.approved && Array.isArray(verifyRaw?.errors) && verifyRaw.errors.length > 0) {
+          // Verification found issues — add them to ambiguities so user sees warning
+          const existingAmbiguities: string[] = Array.isArray(raw.ambiguities) ? raw.ambiguities : [];
+          raw.ambiguities = [...existingAmbiguities, ...verifyRaw.errors.map((e: string) => `⚠️ ${e}`)];
+          raw.confidence = Math.min(raw.confidence ?? 0.5, 0.6); // lower confidence
+        }
+      } catch {
+        // Verification failure is non-fatal
+      }
     }
 
     // Basic shape validation + gentle fallback defaults

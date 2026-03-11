@@ -229,19 +229,22 @@ function TopProgressBar({ color = "var(--lifeos-pink)" }: { color?: string }) {
   );
 }
 
-function FullScreenLoader({ visible, messages, color = "var(--lifeos-pink)" }: {
+function FullScreenLoader({ visible, messages, color = "var(--lifeos-pink)", streamingText }: {
   visible: boolean;
   messages: string[];
   icon?: string; // kept for API compat, unused
   color?: string;
+  streamingText?: string; // optional live-streamed coach text to show instead of cycling messages
 }) {
   const [msgIdx, setMsgIdx] = useState(0);
 
   useEffect(() => {
     if (!visible) { setMsgIdx(0); return; }
+    // Don't cycle messages when streaming text is being shown
+    if (streamingText) return;
     const t = setInterval(() => setMsgIdx((i) => (i + 1) % messages.length), 2200);
     return () => clearInterval(t);
-  }, [visible, messages.length]);
+  }, [visible, messages.length, streamingText]);
 
   return (
     <AnimatePresence>
@@ -289,11 +292,23 @@ function FullScreenLoader({ visible, messages, color = "var(--lifeos-pink)" }: {
           {/* Waveform */}
           <WaveformBars color={color} />
 
-          {/* Typewriter message */}
+          {/* Typewriter message — shows streaming coach text if available, else cycles */}
           <div
-            className="mt-7 text-[17px] font-bold text-black/80 min-h-[28px] text-center"
+            className="mt-7 text-[17px] font-bold text-black/80 min-h-[28px] text-center px-8 max-w-sm"
             style={{ letterSpacing: "-0.025em" }}
           >
+            {streamingText ? (
+              <motion.span
+                key="streaming"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+                className="text-[15px] font-semibold text-black/70 leading-snug"
+              >
+                {streamingText}
+                <span style={{ color, opacity: 0.7 }}>|</span>
+              </motion.span>
+            ) : (
             <AnimatePresence mode="wait">
               <motion.span
                 key={msgIdx}
@@ -305,6 +320,7 @@ function FullScreenLoader({ visible, messages, color = "var(--lifeos-pink)" }: {
                 <TypewriterText key={`tw-${msgIdx}`} text={messages[msgIdx]} color={color} />
               </motion.span>
             </AnimatePresence>
+            )}
           </div>
 
           {/* Subtle status dots strip */}
@@ -333,8 +349,8 @@ function FullScreenLoader({ visible, messages, color = "var(--lifeos-pink)" }: {
 }
 
 // Generating overlay — external hold so React batching doesn't swallow the show+hide
-function GeneratingOverlay({ visible }: { visible: boolean }) {
-  return <FullScreenLoader visible={visible} messages={GENERATING_MESSAGES} icon="✦" />;
+function GeneratingOverlay({ visible, streamingCoach }: { visible: boolean; streamingCoach?: string }) {
+  return <FullScreenLoader visible={visible} messages={GENERATING_MESSAGES} icon="✦" streamingText={streamingCoach || undefined} />;
 }
 
 // Syllabus overlay — shows during PDF/DOCX parsing, minimum 600ms so it doesn't flash
@@ -3197,7 +3213,7 @@ export default function GeneratePage() {
       const res = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: richInput, preferenceContext: getPreferenceContext(), timezone: getUserTimezone(), recentHistory: getRecentHistoryContext(), smartProfile: getSmartProfileString() }),
+        body: JSON.stringify({ input: richInput, preferenceContext: getPreferenceContext(), timezone: getUserTimezone(), recentHistory: getRecentHistoryContext(), smartProfile: getSmartProfileString(), calendarContext: loadCalendar().slice(0, 50) }),
       });
       const data = (await res.json()) as Plan & { error?: string };
       if (!res.ok) throw new Error((data as any)?.error ?? "Request failed");
@@ -3283,6 +3299,7 @@ export default function GeneratePage() {
 
   // ── Generating overlay state (external setTimeout hold — fixes React batching) ──
   const [generatingVisible, setGeneratingVisible] = useState(false);
+  const [streamingCoach, setStreamingCoach] = useState(""); // live-streamed coach text shown in overlay
   const genShownAt = useRef<number>(0);
   const genHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const GEN_MIN_MS = 900;
@@ -4224,8 +4241,9 @@ export default function GeneratePage() {
         } // end !isNonCalendarActivity guard
       }
 
-      // Fall through to planning API — send preprocessed input + smart profile
-      const res = await fetch("/api/plan", {
+      // Fall through to planning API — use streaming endpoint for progressive coach display
+      setStreamingCoach(""); // reset
+      const streamRes = await fetch("/api/plan/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -4234,15 +4252,56 @@ export default function GeneratePage() {
           timezone: getUserTimezone(),
           recentHistory: getRecentHistoryContext(),
           smartProfile: getSmartProfileString(),
+          calendarContext: loadCalendar().slice(0, 50),
         }),
       });
 
-      const data = (await res.json()) as Plan & { error?: string; confidence?: number; ambiguities?: string[] };
-
-      if (!res.ok) {
-        const errorMsg = (data as any)?.error ?? "Request failed";
-        throw new Error(errorMsg);
+      if (!streamRes.ok || !streamRes.body) {
+        // Fallback to non-streaming if stream endpoint fails
+        const errText = await streamRes.text().catch(() => "Request failed");
+        throw new Error(errText);
       }
+
+      // Read SSE stream
+      let data: Plan & { error?: string; confidence?: number; ambiguities?: string[] } | null = null;
+      {
+        const reader = streamRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          // Process complete SSE lines
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? ""; // keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr) continue;
+            let evt: any;
+            try { evt = JSON.parse(jsonStr); } catch { continue; } // skip malformed SSE line
+            if (evt.type === "coach") {
+              // Accumulate coach text and show it in the overlay
+              setStreamingCoach((prev) => prev + (evt.delta ?? ""));
+            } else if (evt.type === "plan") {
+              data = evt.plan as Plan & { error?: string; confidence?: number; ambiguities?: string[] };
+            } else if (evt.type === "error") {
+              throw new Error(evt.message ?? "Streaming error");
+            }
+          }
+        }
+      }
+
+      if (!data) {
+        throw new Error("No plan received from AI");
+      }
+
+      // Clear streaming coach text (plan is loaded)
+      setStreamingCoach("");
 
       // Rebuild smart profile in background after each successful plan
       maybeRebuildSmartProfile();
@@ -4317,6 +4376,7 @@ export default function GeneratePage() {
       }
     } catch (e: any) {
       setError(e?.message ?? "Something went wrong");
+      setStreamingCoach(""); // clear on error
     } finally {
       setLoading(false);
       hideGeneratingOverlay();
@@ -4673,7 +4733,7 @@ export default function GeneratePage() {
   return (
     <>
     {/* ── Full-screen loading overlays ── */}
-    <GeneratingOverlay visible={generatingVisible} />
+    <GeneratingOverlay visible={generatingVisible} streamingCoach={streamingCoach} />
     <SuggestionsLoadingOverlay visible={suggestionsLoading} />
     <SyllabusLoadingOverlay visible={syllabusLoading} />
 

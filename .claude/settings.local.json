@@ -4,7 +4,13 @@
       "Bash(node -e:*)",
       "Bash(npx tsc:*)",
       "Bash(git checkout:*)",
-      "Bash(lsof:*)"
+      "Bash(lsof:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd Vercel custom event tracking for key user actions\n\nTracks four core conversion events:\n- Generate: fired when user submits a prompt \\(with input length\\)\n- PlanGenerated: server-side, fired after AI responds \\(with schedule size, deadline/meal flags\\)\n- AddToCalendar: fired when user confirms and saves blocks \\(with block count\\)\n- Signup: fired when user initiates Google sign-in\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(npm run build:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix AI language understanding: timezone, history context, filter, temperature, timeout\n\n- Send real user timezone from browser \\(Intl.DateTimeFormat\\) instead of hardcoded Europe/Madrid\n- Send last 5 planning history items with every request for personalization\n- Loosen hallucination filter — keep legitimate AI additions \\(study sessions, meal blocks, routines\\)\n- Increase temperature 0.5 → 0.7 for more natural, human-feeling scheduling\n- Increase API timeout 12s → 25s to prevent errors on complex inputs\n- Import loadHistory in page.tsx for history context helper\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit:*)"
     ]
   }
 }
