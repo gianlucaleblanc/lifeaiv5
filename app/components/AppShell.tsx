@@ -55,14 +55,17 @@ function Icon({ name, active }: { name: "spark" | "list" | "calendar" | "user"; 
 function LogoMark() {
   return (
     <Link href="/" className="flex items-center gap-2 group select-none">
-      {/* Drop your logo as public/logo.png to replace this */}
+      {/*
+        Logo is a 1024×1024 square with ~25% whitespace padding on each side.
+        We show it at 160×50, contain, so the full wordmark is visible.
+        The bg of the header is semi-transparent gray so the white canvas blends in.
+      */}
       <img
         src="/logo.png"
         alt="OpenHour"
-        className="transition-all duration-200 group-hover:scale-105 group-hover:brightness-105"
-        style={{ height: 32, width: "auto", display: "block" }}
+        className="transition-all duration-200 group-hover:scale-105 shrink-0"
+        style={{ height: 50, width: 160, objectFit: "contain", objectPosition: "left center", display: "block" }}
         onError={(e) => {
-          // Fallback: hide broken img and show text logo
           (e.currentTarget as HTMLImageElement).style.display = "none";
           const next = e.currentTarget.nextElementSibling as HTMLElement | null;
           if (next) next.style.display = "flex";
