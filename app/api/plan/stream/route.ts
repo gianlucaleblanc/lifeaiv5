@@ -20,10 +20,14 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
 const DEFAULT_TIMEZONE = "America/New_York";
-const DEFAULT_MODEL = "claude-opus-4-5-20251101";
+const DEFAULT_MODEL = USE_CLAUDE ? "claude-opus-4-5-20251101" : (process.env.OPENAI_MODEL || "gpt-4o");
+
+const anthropic = USE_CLAUDE ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
+const openaiClient = USE_CLAUDE ? null : new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ── Shared utilities (duplicated from route.ts to keep files independent) ──────
 
@@ -87,9 +91,9 @@ function sseChunk(data: object): Uint8Array {
 // ── POST handler ──────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
     return new Response(
-      `data: ${JSON.stringify({ type: "error", message: "Missing ANTHROPIC_API_KEY" })}\n\n`,
+      `data: ${JSON.stringify({ type: "error", message: "Missing API key (set ANTHROPIC_API_KEY or OPENAI_API_KEY)" })}\n\n`,
       { status: 500, headers: { "Content-Type": "text/event-stream" } }
     );
   }
@@ -190,27 +194,32 @@ ${dateMapSection ? `\nCRITICAL: Use DATE MAP above. Every event on its own date.
 
       try {
         // Phase 1: Stream the COACH message token-by-token for progressive display
-        // Anthropic streaming uses stream() method with async iteration.
-        const coachStream = client.messages.stream({
-          model: DEFAULT_MODEL,
-          max_tokens: 100,
-          system: `${STATIC_SYSTEM}\n\n${DYNAMIC_CONTEXT}`,
-          messages: [
-            {
-              role: "user",
-              content: `${userPrompt}\n\nWrite ONLY a short, punchy, motivational coach message (1-2 sentences) directly about what the user is doing today. Be specific to their activity. No generic phrases. No JSON.`,
-            },
-          ],
-        });
+        const coachUserMsg = `${userPrompt}\n\nWrite ONLY a short, punchy, motivational coach message (1-2 sentences) directly about what the user is doing today. Be specific to their activity. No generic phrases. No JSON.`;
+        const coachSystem = `${STATIC_SYSTEM}\n\n${DYNAMIC_CONTEXT}`;
 
         let coachText = "";
-        for await (const event of coachStream) {
-          if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
-            const delta = event.delta.text ?? "";
-            if (delta) {
-              coachText += delta;
-              enqueue({ type: "coach", delta });
+
+        if (USE_CLAUDE && anthropic) {
+          const coachStream = anthropic.messages.stream({
+            model: DEFAULT_MODEL,
+            max_tokens: 100,
+            system: coachSystem,
+            messages: [{ role: "user", content: coachUserMsg }],
+          });
+          for await (const event of coachStream) {
+            if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+              const delta = event.delta.text ?? "";
+              if (delta) { coachText += delta; enqueue({ type: "coach", delta }); }
             }
+          }
+        } else if (openaiClient) {
+          const coachStream = await openaiClient.chat.completions.create({
+            model: DEFAULT_MODEL, max_tokens: 100, stream: true,
+            messages: [{ role: "system", content: coachSystem }, { role: "user", content: coachUserMsg }],
+          });
+          for await (const chunk of coachStream) {
+            const delta = chunk.choices?.[0]?.delta?.content ?? "";
+            if (delta) { coachText += delta; enqueue({ type: "coach", delta }); }
           }
         }
 
@@ -254,25 +263,51 @@ ${dateMapSection ? `\nCRITICAL: Use DATE MAP above. Every event on its own date.
           },
         };
 
-        const planCall = await client.messages.create({
-          model: DEFAULT_MODEL,
-          max_tokens: 4096,
-          temperature: 1,
-          tool_choice: { type: "tool", name: "create_plan" },
-          tools: [planTool],
-          system: `${STATIC_SYSTEM}\n\n${DYNAMIC_CONTEXT}`,
-          messages: [
-            { role: "user", content: userPrompt },
-          ],
-        });
-
-        const toolUseBlock = planCall.content?.find((b: any) => b.type === "tool_use") as any;
         let raw: any;
-        if (toolUseBlock?.input) {
-          raw = toolUseBlock.input;
+
+        if (USE_CLAUDE && anthropic) {
+          const planCall = await anthropic.messages.create({
+            model: DEFAULT_MODEL,
+            max_tokens: 4096,
+            temperature: 1,
+            tool_choice: { type: "tool", name: "create_plan" },
+            tools: [planTool],
+            system: `${STATIC_SYSTEM}\n\n${DYNAMIC_CONTEXT}`,
+            messages: [{ role: "user", content: userPrompt }],
+          });
+          const toolUseBlock = planCall.content?.find((b: any) => b.type === "tool_use") as any;
+          if (toolUseBlock?.input) {
+            raw = toolUseBlock.input;
+          } else {
+            const textBlock = planCall.content?.find((b: any) => b.type === "text") as any;
+            raw = safeJsonParse(textBlock?.text ?? "{}");
+          }
+        } else if (openaiClient) {
+          const oaiTool: any = {
+            type: "function",
+            function: {
+              name: planTool.name,
+              description: planTool.description,
+              parameters: { ...(planTool.input_schema as any) },
+            },
+          };
+          const planCall = await openaiClient.chat.completions.create({
+            model: DEFAULT_MODEL, max_tokens: 4096, temperature: 0.3,
+            tool_choice: { type: "function", function: { name: "create_plan" } },
+            tools: [oaiTool],
+            messages: [
+              { role: "system", content: `${STATIC_SYSTEM}\n\n${DYNAMIC_CONTEXT}` },
+              { role: "user", content: userPrompt },
+            ],
+          });
+          const tc = planCall.choices?.[0]?.message?.tool_calls?.[0] as any;
+          if (tc?.function?.arguments) {
+            try { raw = JSON.parse(tc.function.arguments); } catch { raw = {}; }
+          } else {
+            raw = safeJsonParse(planCall.choices?.[0]?.message?.content ?? "{}");
+          }
         } else {
-          const textBlock = planCall.content?.find((b: any) => b.type === "text") as any;
-          raw = safeJsonParse(textBlock?.text ?? "{}");
+          throw new Error("No AI provider configured");
         }
 
         // Override coach with the streamed version (more fluid, already shown to user)

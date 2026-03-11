@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
 const POSTHOG_KEY = "phc_5rgri5Bb6XL3CW4b8w82qMPWjCtwTIzGQ7eH54cMGve";
@@ -17,12 +18,101 @@ async function captureServerEvent(event: string, properties: Record<string, any>
   } catch { /* non-blocking */ }
 }
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+// ── AI Provider: Claude (preferred) → GPT-4o (fallback) ──────────────────────
+const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
+const DEFAULT_MODEL = USE_CLAUDE
+  ? "claude-opus-4-5-20251101"
+  : (process.env.OPENAI_MODEL || "gpt-4o");
+
+const anthropic = USE_CLAUDE ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
+const openai    = USE_CLAUDE ? null : new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+/** Unified messages.create() — same call shape regardless of provider */
+const client = {
+  messages: {
+    async create(params: {
+      model: string; max_tokens: number; temperature?: number;
+      system: string; messages: Array<{ role: "user" | "assistant"; content: string }>;
+      tools?: Anthropic.Tool[]; tool_choice?: any;
+    }): Promise<any> {
+      if (USE_CLAUDE && anthropic) {
+        return anthropic.messages.create(params as any);
+      }
+      // OpenAI fallback — translate Anthropic params to OpenAI format
+      const oaiMessages: any[] = [
+        { role: "system", content: params.system },
+        ...params.messages,
+      ];
+      const hasTools = Array.isArray(params.tools) && params.tools.length > 0;
+      const oaiParams: any = {
+        model: DEFAULT_MODEL,
+        max_tokens: params.max_tokens,
+        temperature: params.temperature ?? 0.3,
+        messages: oaiMessages,
+        ...(hasTools ? {
+          tools: params.tools!.map((t: Anthropic.Tool) => ({
+            type: "function" as const,
+            function: {
+              name: t.name,
+              description: t.description,
+              parameters: { ...(t.input_schema as any) },
+            },
+          })),
+          tool_choice: params.tool_choice?.name
+            ? { type: "function" as const, function: { name: params.tool_choice.name } }
+            : ("auto" as const),
+        } : {
+          response_format: { type: "json_object" as const },
+        }),
+      };
+      const res = await openai!.chat.completions.create(oaiParams);
+      // Normalize OpenAI response to look like Anthropic's shape
+      const msg = res.choices?.[0]?.message;
+      const content: any[] = [];
+      if (msg?.content) content.push({ type: "text", text: msg.content });
+      if (msg?.tool_calls?.[0]) {
+        const tc = msg.tool_calls[0] as any;
+        let input: any = {};
+        try { input = JSON.parse(tc.function?.arguments ?? "{}"); } catch {}
+        content.push({ type: "tool_use", id: tc.id, name: tc.function?.name, input });
+      }
+      return { content };
+    },
+
+    stream(params: {
+      model: string; max_tokens: number; system: string;
+      messages: Array<{ role: "user" | "assistant"; content: string }>;
+    }) {
+      if (USE_CLAUDE && anthropic) return anthropic.messages.stream(params as any);
+      // OpenAI streaming — return an async iterable that emits Anthropic-shaped events
+      const oaiMessages: any[] = [
+        { role: "system", content: params.system },
+        ...params.messages,
+      ];
+      const streamPromise = openai!.chat.completions.create({
+        model: DEFAULT_MODEL,
+        max_tokens: params.max_tokens,
+        stream: true,
+        messages: oaiMessages,
+      });
+      // Return an async iterable that yields Anthropic-shaped content_block_delta events
+      return (async function* () {
+        const stream = await streamPromise;
+        for await (const chunk of stream) {
+          const delta = chunk.choices?.[0]?.delta?.content ?? "";
+          if (delta) {
+            yield {
+              type: "content_block_delta",
+              delta: { type: "text_delta", text: delta },
+            };
+          }
+        }
+      })();
+    },
+  },
+};
 
 const DEFAULT_TIMEZONE = "America/New_York";
-const DEFAULT_MODEL = "claude-opus-4-5-20251101";
 
 type Weekday = 0|1|2|3|4|5|6; // Sun..Sat
 
@@ -281,9 +371,9 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!process.env.ANTHROPIC_API_KEY) {
+    if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
       return NextResponse.json(
-        { error: "Missing ANTHROPIC_API_KEY in environment variables." },
+        { error: "Missing API key. Set ANTHROPIC_API_KEY (for Claude) or OPENAI_API_KEY (for GPT-4o)." },
         { status: 500 }
       );
     }

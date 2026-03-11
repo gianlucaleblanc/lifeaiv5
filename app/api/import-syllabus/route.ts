@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
 // Lazy imports so the app can still boot even if the user hasn't run `npm install` yet.
@@ -28,8 +29,26 @@ async function extractTextFromDocx(buf: Buffer): Promise<string> {
   return typeof out?.value === "string" ? out.value : "";
 }
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const DEFAULT_MODEL = "claude-opus-4-5-20251101";
+const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
+const DEFAULT_MODEL = USE_CLAUDE ? "claude-opus-4-5-20251101" : (process.env.OPENAI_MODEL || "gpt-4o");
+
+async function callAI(system: string, user: string, maxTokens = 8192): Promise<string> {
+  if (USE_CLAUDE) {
+    const c = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const res = await c.messages.create({
+      model: DEFAULT_MODEL, max_tokens: maxTokens, temperature: 1,
+      system, messages: [{ role: "user", content: user }],
+    });
+    return (res.content?.[0] as any)?.text ?? "{}";
+  }
+  const c = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const res = await c.chat.completions.create({
+    model: DEFAULT_MODEL, max_tokens: maxTokens, temperature: 0,
+    response_format: { type: "json_object" },
+    messages: [{ role: "system", content: system }, { role: "user", content: user }],
+  });
+  return res.choices?.[0]?.message?.content ?? "{}";
+}
 
 function safeJsonParse(text: string): any {
   try {
@@ -1779,19 +1798,9 @@ Use fixed values only — do NOT vary within a confidence tier:
 
     const user = `USER INSTRUCTIONS (optional):\n${instructions || "(none)"}\n\nSYLLABUS TEXT (clipped):\n\n${clipped}`;
 
-    // Use Claude Messages API for reliable structured extraction.
-    const cc = await withTimeout(
-      client.messages.create({
-        model: DEFAULT_MODEL,
-        max_tokens: 8192,
-        temperature: 1,
-        system,
-        messages: [
-          { role: "user", content: user },
-        ],
-      })
-    );
-    const raw = safeJsonParse((cc.content?.[0] as any)?.text ?? "{}");
+    // Use AI (Claude preferred, GPT-4o fallback) for structured extraction.
+    const rawText = await withTimeout(callAI(system, user, 8192));
+    const raw = safeJsonParse(rawText);
 
     const events = Array.isArray(raw?.events) ? raw.events : [];
     const meetings = Array.isArray(raw?.meetings) ? raw.meetings : [];

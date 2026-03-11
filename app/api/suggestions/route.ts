@@ -1,8 +1,27 @@
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const DEFAULT_MODEL = "claude-opus-4-5-20251101";
+const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
+const DEFAULT_MODEL = USE_CLAUDE ? "claude-opus-4-5-20251101" : (process.env.OPENAI_MODEL || "gpt-4o");
+
+async function callAI(system: string, user: string, maxTokens = 1024): Promise<string> {
+  if (USE_CLAUDE) {
+    const c = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const res = await c.messages.create({
+      model: DEFAULT_MODEL, max_tokens: maxTokens, temperature: 1,
+      system, messages: [{ role: "user", content: user }],
+    });
+    return (res.content?.[0] as any)?.text ?? "{}";
+  }
+  const c = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const res = await c.chat.completions.create({
+    model: DEFAULT_MODEL, max_tokens: maxTokens, temperature: 0.3,
+    response_format: { type: "json_object" },
+    messages: [{ role: "system", content: system }, { role: "user", content: user }],
+  });
+  return res.choices?.[0]?.message?.content ?? "{}";
+}
 
 type Anchor = {
   date: string; // YYYY-MM-DD
@@ -300,17 +319,7 @@ export async function POST(req: Request) {
 
     const user = JSON.stringify({ input, anchors });
 
-    const cc = await client.messages.create({
-      model: DEFAULT_MODEL,
-      max_tokens: 1024,
-      temperature: 1,
-      system,
-      messages: [
-        { role: "user", content: user },
-      ],
-    });
-
-    const rawText = (cc.content?.[0] as any)?.text ?? "{}";
+    const rawText = await callAI(system, user, 1024);
     let raw: any = {};
     try {
       raw = JSON.parse(rawText);
