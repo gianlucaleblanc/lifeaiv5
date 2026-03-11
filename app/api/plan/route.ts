@@ -21,7 +21,7 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const USER_TIMEZONE = "Europe/Madrid";
+const DEFAULT_TIMEZONE = "America/New_York";
 // Normalize model name - ensure it's a valid OpenAI model
 const rawModel = process.env.OPENAI_MODEL || "gpt-4o";
 const DEFAULT_MODEL = rawModel.trim() || "gpt-4o";
@@ -104,17 +104,17 @@ function parseWeekdayToken(text: string): Weekday | null {
   return null;
 }
 
-function nextIsoForWeekday(now: Date, target: Weekday): string {
+function nextIsoForWeekday(now: Date, target: Weekday, tz: string = DEFAULT_TIMEZONE): string {
   const d = new Date(now);
   d.setHours(12, 0, 0, 0);
   const cur = d.getDay() as Weekday;
   let delta = (target - cur + 7) % 7;
   // If the user says "Friday" and today is Friday, assume today (delta=0)
   d.setDate(d.getDate() + delta);
-  return isoDateInTimeZone(d, USER_TIMEZONE);
+  return isoDateInTimeZone(d, tz);
 }
 
-function resolvePlanningDate(input: string, now: Date): { iso: string; label: string; source: string } {
+function resolvePlanningDate(input: string, now: Date, tz: string = DEFAULT_TIMEZONE): { iso: string; label: string; source: string } {
   const trimmed = String(input ?? "");
   const lower = trimmed.toLowerCase();
 
@@ -152,14 +152,14 @@ function resolvePlanningDate(input: string, now: Date): { iso: string; label: st
   if (/\b(tomorrow|tmrw|tmr|2mrw|demain|ma[ñn]ana|morgen|amanhã|domani|завтра|明日|내일)\b/i.test(lower)) {
     const d = new Date(now);
     d.setDate(d.getDate() + 1);
-    const iso = isoDateInTimeZone(d, USER_TIMEZONE);
+    const iso = isoDateInTimeZone(d, tz);
     const label = new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "short", day: "numeric" });
     return { iso, label, source: "tomorrow (multilingual)" };
   }
 
   // Multilingual "today/tonight"
   if (/\b(tonight|2nite|2day|ce soir|aujourd'hui|esta noche|hoy|heute|hoje|stasera|сегодня|今日|오늘)\b/i.test(lower)) {
-    const iso = isoDateInTimeZone(now, USER_TIMEZONE);
+    const iso = isoDateInTimeZone(now, tz);
     const label = new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "short", day: "numeric" });
     return { iso, label, source: "today/tonight (multilingual)" };
   }
@@ -173,7 +173,7 @@ function resolvePlanningDate(input: string, now: Date): { iso: string; label: st
     const m = trimmed.match(re);
     const wd = m ? parseWeekdayToken(m[1]) : null;
     if (wd !== null) {
-      const iso = nextIsoForWeekday(now, wd);
+      const iso = nextIsoForWeekday(now, wd, tz);
       const label = new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "short", day: "numeric" });
       return { iso, label, source: "weekday (primary event)" };
     }
@@ -184,7 +184,7 @@ function resolvePlanningDate(input: string, now: Date): { iso: string; label: st
     const m = trimmed.match(new RegExp(`\\bon\\s+(${weekdayNames})\\b`, "i"));
     const wd = m ? parseWeekdayToken(m[1]) : null;
     if (wd !== null) {
-      const iso = nextIsoForWeekday(now, wd);
+      const iso = nextIsoForWeekday(now, wd, tz);
       const label = new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "short", day: "numeric" });
       return { iso, label, source: "weekday (on <weekday>)" };
     }
@@ -198,14 +198,14 @@ function resolvePlanningDate(input: string, now: Date): { iso: string; label: st
     while ((mm = reAll.exec(trimmed)) !== null) last = mm[1];
     const wd = last ? parseWeekdayToken(last) : null;
     if (wd !== null) {
-      const iso = nextIsoForWeekday(now, wd);
+      const iso = nextIsoForWeekday(now, wd, tz);
       const label = new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "short", day: "numeric" });
       return { iso, label, source: "weekday (last mention)" };
     }
   }
 
   // Default: today
-  const iso = isoDateInTimeZone(now, USER_TIMEZONE);
+  const iso = isoDateInTimeZone(now, tz);
   const label = new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "short", day: "numeric" });
   return { iso, label, source: "default today" };
 }
@@ -263,6 +263,10 @@ export async function POST(req: Request) {
     const input = body?.input;
     // Learned preferences passed from client (stored in localStorage, sent on each request)
     const preferenceContext: string = typeof body?.preferenceContext === "string" ? body.preferenceContext : "";
+    // User's real timezone from browser (Intl.DateTimeFormat)
+    const USER_TIMEZONE: string = typeof body?.timezone === "string" && body.timezone.length > 0 ? body.timezone : DEFAULT_TIMEZONE;
+    // Recent history context — last 5 inputs the user has planned
+    const recentHistory: string = typeof body?.recentHistory === "string" ? body.recentHistory : "";
     // Special modes
     const isMutation: boolean = body?.mutation === true;
     const isBreakdown: boolean = body?.breakdown === true;
@@ -395,7 +399,7 @@ RULES:
     }
 
     const nowTz = nowInTimeZone(USER_TIMEZONE);
-    const planning = resolvePlanningDate(input, nowTz);
+    const planning = resolvePlanningDate(input, nowTz, USER_TIMEZONE);
     const todayIso = isoDateInTimeZone(nowTz, USER_TIMEZONE);
 
     // ── FULL-DAY PLAN MODE ────────────────────────────────────────────────────────
@@ -663,6 +667,7 @@ NOTES:
 - personalInsight: 1–2 sentences tied to the actual activity, not generic.
 - streak: 1 for now.
 ${preferenceContext ? `\nUSER PREFERENCES (learned from past sessions — follow these closely):\n${preferenceContext}` : ""}
+${recentHistory ? `\nUSER'S RECENT PLANNING HISTORY (last 5 sessions — use to personalize, detect patterns, avoid repetition):\n${recentHistory}` : ""}
 `;
 
     const userPrompt = `
@@ -680,14 +685,14 @@ try {
   const cc = await withTimeout(
     client.chat.completions.create({
       model: DEFAULT_MODEL,
-      temperature: 0.5,
+      temperature: 0.7,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
     }),
-    12000
+    25000
   );
 
   const text = cc.choices?.[0]?.message?.content ?? "{}";
@@ -740,43 +745,35 @@ plan.assumptions = plan.assumptions.filter((x: any) => typeof x === "string");
         plan: Array.isArray(b.plan) ? b.plan.filter((x: any) => typeof x === "string") : [],
       }));
 
-    // --- FILTER: remove invented plan lines ---
-    // The UI/merge logic will schedule whatever appears in schedule[].plan.
-    // To keep the app professional and predictable, we only keep items that are
-    // explicitly supported by the user's input (simple lexical grounding).
+    // --- FILTER: remove clearly hallucinated plan lines ---
+    // Only strip lines that contain ZERO semantic overlap with the user's input.
+    // We intentionally keep AI-generated context (e.g. "Study Session", "Work Block",
+    // "Morning Routine") even if those exact words aren't in the input — they are
+    // legitimate scheduling additions. We only remove lines that are completely
+    // disconnected from anything the user mentioned.
     {
       const inputLower = String(input ?? "").toLowerCase();
-      const stop = new Set([
-        "the","a","an","to","for","and","or","of","in","on","at","by","with","my","i","me","we","us",
-        "today","tomorrow","tonight","this","next","please","would","like","want","need","have",
-        "morning","afternoon","evening","night",
-      ]);
 
-      const normalizeLine = (s: string) =>
-        String(s)
-          .replace(/\([^)]*\)/g, " ")
-          .replace(/\b(?:today|tomorrow|tonight)\b/gi, " ")
-          .replace(/\s+/g, " ")
-          .trim();
-
-      const tokens = (s: string) =>
-        normalizeLine(s)
-          .toLowerCase()
-          .split(/[^a-z0-9]+/g)
-          .filter((t) => t.length >= 3 && !stop.has(t));
+      // Always-keep categories: meals, routines, generic scheduling terms the AI adds legitimately
+      const alwaysKeep = [
+        "lunch","dinner","breakfast","brunch","snack","meal",
+        "morning routine","evening","wind down","break","buffer",
+        "study","work","session","block","review","prep","practice",
+        "gym","workout","exercise","run","walk","yoga","stretch",
+        "sleep","rest","nap","bed",
+        "commute","travel","transit",
+      ];
 
       const keep = (line: string) => {
-        const tks = tokens(line);
-        if (tks.length === 0) return false;
-
-        // Always keep if it contains a primary keyword that the user mentioned.
-        const primary = ["flight","airport","pack","exam","quiz","midterm","final","presentation","project","assignment","essay","paper","run","workout","gym"];
-        for (const k of primary) {
-          if (line.toLowerCase().includes(k) && inputLower.includes(k)) return true;
-        }
-
-        // Otherwise require at least one meaningful token to appear in the input.
-        return tks.some((t) => inputLower.includes(t));
+        const ll = line.toLowerCase();
+        // Always keep common scheduling terms the AI legitimately adds
+        if (alwaysKeep.some((k) => ll.includes(k))) return true;
+        // Keep if any 4+ character word from the line appears in user input
+        const words = ll.split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
+        if (words.some((w) => inputLower.includes(w))) return true;
+        // Keep if the line is short (likely a label, not an invented paragraph)
+        if (line.trim().split(" ").length <= 4) return true;
+        return false;
       };
 
       plan.schedule = plan.schedule

@@ -9,6 +9,7 @@ import {
   addSyllabusEventsToCalendar,
   addToHistory,
   loadCalendar,
+  loadHistory,
   saveCalendar,
   loadCustomEventKeywords,
   addCustomEventKeyword,
@@ -3110,6 +3111,24 @@ export default function GeneratePage() {
     return buildPreferenceContext(prefs, recent);
   }
 
+  function getUserTimezone(): string {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      return "America/New_York";
+    }
+  }
+
+  function getRecentHistoryContext(): string {
+    try {
+      const history = loadHistory().slice(0, 5);
+      if (!history.length) return "";
+      return history.map((h: HistoryItem) => `- "${h.input}" (${h.createdAt?.slice(0, 10) ?? "recent"})`).join("\n");
+    } catch {
+      return "";
+    }
+  }
+
   // ── Day Plan: builds a rich natural language input from modal prefs ──
   function buildDayPlanInput(p: typeof dayPlanPrefs): string {
     const wakeMap: Record<string, string> = { early: "6am", morning: "8am", late: "10am" };
@@ -3150,7 +3169,7 @@ export default function GeneratePage() {
       const res = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: richInput, preferenceContext: getPreferenceContext() }),
+        body: JSON.stringify({ input: richInput, preferenceContext: getPreferenceContext(), timezone: getUserTimezone(), recentHistory: getRecentHistoryContext() }),
       });
       const data = (await res.json()) as Plan & { error?: string };
       if (!res.ok) throw new Error((data as any)?.error ?? "Request failed");
@@ -4172,7 +4191,7 @@ export default function GeneratePage() {
       const res = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: ni, preferenceContext: getPreferenceContext() }),
+        body: JSON.stringify({ input: ni, preferenceContext: getPreferenceContext(), timezone: getUserTimezone(), recentHistory: getRecentHistoryContext() }),
       });
 
       const data = (await res.json()) as Plan & { error?: string };
