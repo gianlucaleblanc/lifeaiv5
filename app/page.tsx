@@ -4740,11 +4740,11 @@ export default function GeneratePage() {
     <SuggestionsLoadingOverlay visible={suggestionsLoading} />
     <SyllabusLoadingOverlay visible={syllabusLoading} />
 
-    {/* ── Subtle radial glow behind hero ── */}
+    {/* ── Radial glow behind hero ── */}
     <div
       className="relative min-h-[calc(100vh-80px)] px-4 lg:px-8 xl:px-12 py-12 lg:py-0 lg:flex lg:items-center"
       style={{
-        background: "radial-gradient(ellipse 80% 50% at 50% 25%, rgba(217,108,125,0.08) 0%, transparent 65%)",
+        background: "radial-gradient(ellipse 70% 45% at 50% 20%, rgba(217,108,125,0.14) 0%, transparent 60%)",
       }}
     >
       {/* ── 3-column grid (lg+) / single column (mobile) ── */}
@@ -4869,10 +4869,11 @@ export default function GeneratePage() {
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: "easeOut" }}
-        className="inline-flex items-center gap-2 rounded-full border border-[var(--lifeos-pink)]/20 bg-[var(--lifeos-pink)]/6 px-4 py-1.5 mb-6"
+        className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 mb-6"
+        style={{ background: "rgba(217,108,125,0.12)", border: "1px solid rgba(217,108,125,0.28)" }}
       >
         <span className="h-1.5 w-1.5 rounded-full bg-[var(--lifeos-pink)] animate-pulse" />
-        <span className="text-xs font-semibold tracking-wide text-[var(--lifeos-pink)]">Free · No download · Works in 10 seconds</span>
+        <span className="text-xs font-bold tracking-wide" style={{ color: "var(--lifeos-pink)" }}>Free · No download · Works in 10 seconds</span>
       </motion.div>
 
       {/* ── Hero headline ── */}
@@ -4880,12 +4881,18 @@ export default function GeneratePage() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: "easeOut", delay: 0.05 }}
-        className="text-5xl sm:text-[60px] xl:text-[68px] font-extrabold text-black leading-[1.02] max-w-[640px]"
-        style={{ letterSpacing: "-0.04em" }}
+        className="text-5xl sm:text-[66px] xl:text-[76px] font-black text-black leading-[0.97] max-w-[680px]"
+        style={{ letterSpacing: "-0.05em" }}
       >
         Type your day.
         <br />
-        <span style={{ color: "var(--lifeos-pink)" }}>We schedule it.</span>
+        <span style={{
+          color: "var(--lifeos-pink)",
+          background: "linear-gradient(135deg, #e8758a 0%, #d96c7d 50%, #c45870 100%)",
+          WebkitBackgroundClip: "text",
+          WebkitTextFillColor: "transparent",
+          backgroundClip: "text",
+        }}>We schedule it.</span>
       </motion.h1>
 
       <motion.p
@@ -5001,12 +5008,12 @@ export default function GeneratePage() {
         )}
         </AnimatePresence>
 
-        {/* Card container — focus ring turns pink */}
-        <div className="rounded-2xl overflow-hidden transition-all duration-250" style={{ background: "var(--surface-raised)", border: "1px solid var(--divider)", boxShadow: "var(--shadow-md)" }} onFocus={(e) => { (e.currentTarget as HTMLDivElement).style.boxShadow = "0 2px 16px rgba(var(--lifeos-pink-rgb),0.1), 0 8px 40px rgba(var(--lifeos-pink-rgb),0.12)"; (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(var(--lifeos-pink-rgb),0.4)"; }} onBlur={(e) => { (e.currentTarget as HTMLDivElement).style.boxShadow = "var(--shadow-md)"; (e.currentTarget as HTMLDivElement).style.borderColor = "var(--divider)"; }}>
+        {/* Card container — gradient border + deep shadow, glows pink on focus */}
+        <div className="rounded-2xl overflow-hidden transition-all duration-250" style={{ background: "#ffffff", border: "1.5px solid rgba(0,0,0,0.09)", boxShadow: "0 4px 24px rgba(0,0,0,0.10), 0 16px 48px rgba(0,0,0,0.07)" }} onFocus={(e) => { (e.currentTarget as HTMLDivElement).style.boxShadow = "0 4px 24px rgba(217,108,125,0.15), 0 16px 48px rgba(217,108,125,0.14)"; (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(217,108,125,0.45)"; }} onBlur={(e) => { (e.currentTarget as HTMLDivElement).style.boxShadow = "0 4px 24px rgba(0,0,0,0.10), 0 16px 48px rgba(0,0,0,0.07)"; (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(0,0,0,0.09)"; }}>
 
           {/* Textarea */}
           <textarea
-            className="w-full resize-none bg-transparent px-5 pt-5 pb-3 text-[15px] font-medium text-black placeholder:text-black/[0.22] outline-none leading-relaxed"
+            className="w-full resize-none bg-transparent px-5 pt-5 pb-3 text-[16px] font-semibold text-black placeholder:text-black/[0.30] outline-none leading-relaxed"
             rows={4}
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -5056,7 +5063,10 @@ export default function GeneratePage() {
             <button
               onClick={generate}
               disabled={!canGenerate}
-              className="flex items-center gap-2 rounded-xl bg-[var(--lifeos-pink)] px-5 py-2 text-sm font-bold text-white shadow-[0_2px_10px_rgba(217,108,125,0.3)] transition-all hover:shadow-[0_4px_20px_rgba(217,108,125,0.4)] hover:scale-[1.03] active:scale-[0.97] disabled:opacity-35 disabled:shadow-none disabled:scale-100"
+              className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition-all hover:scale-[1.03] active:scale-[0.97] disabled:opacity-35 disabled:scale-100"
+              style={{ background: "linear-gradient(135deg, #e8758a 0%, #d96c7d 50%, #c45870 100%)", boxShadow: "0 2px 12px rgba(217,108,125,0.38), 0 6px 24px rgba(217,108,125,0.22)", transition: "all 150ms ease" }}
+              onMouseEnter={(e) => { if (!(e.currentTarget as HTMLButtonElement).disabled) (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 4px 20px rgba(217,108,125,0.52), 0 10px 36px rgba(217,108,125,0.28)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 2px 12px rgba(217,108,125,0.38), 0 6px 24px rgba(217,108,125,0.22)"; }}
             >
               {syllabusLoading || loading ? (
                 <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">

@@ -54,19 +54,22 @@ function Icon({ name, active }: { name: "spark" | "list" | "calendar" | "user"; 
 // ─────────────────────────────────────────────────────────────
 function LogoMark() {
   return (
-    <Link href="/" className="flex items-center gap-2 group select-none">
+    <Link href="/" className="flex items-center gap-2.5 group select-none">
       <div
-        className="h-8 w-8 rounded-[10px] grid place-items-center transition-all duration-200 group-hover:scale-105"
-        style={{ background: "var(--lifeos-pink)", boxShadow: "var(--shadow-accent)" }}
+        className="h-9 w-9 rounded-[12px] grid place-items-center transition-all duration-200 group-hover:scale-105 group-hover:brightness-105"
+        style={{
+          background: "linear-gradient(145deg, #e8758a 0%, var(--lifeos-pink) 55%, #c45870 100%)",
+          boxShadow: "var(--shadow-accent), inset 0 1px 0 rgba(255,255,255,0.25)",
+        }}
       >
-        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden="true">
-          <circle cx="12" cy="12" r="8" stroke="white" strokeWidth="1.9" />
-          <path d="M12 8v4l2.5 2.5" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+        <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" style={{ width: 18, height: 18 }} fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="8" stroke="white" strokeWidth="2" />
+          <path d="M12 8v4l2.5 2.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </div>
       <div className="flex items-baseline gap-0">
-        <span className="font-extrabold text-black" style={{ fontSize: 19, letterSpacing: "-0.045em" }}>Open</span>
-        <span className="font-extrabold" style={{ fontSize: 19, letterSpacing: "-0.045em", color: "var(--lifeos-pink)" }}>Hour</span>
+        <span className="font-black text-black" style={{ fontSize: 20, letterSpacing: "-0.05em" }}>Open</span>
+        <span className="font-black" style={{ fontSize: 20, letterSpacing: "-0.05em", color: "var(--lifeos-pink)" }}>Hour</span>
       </div>
     </Link>
   );
@@ -407,13 +410,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <header
         className="sticky top-0 z-40"
         style={{
-          backgroundColor: `rgba(var(--background-rgb, 249,248,248), 0.85)`,
-          backdropFilter: "blur(16px) saturate(1.5)",
-          WebkitBackdropFilter: "blur(16px) saturate(1.5)",
-          borderBottom: "1px solid var(--divider)",
+          backgroundColor: `rgba(var(--background-rgb, 238,240,243), 0.92)`,
+          backdropFilter: "blur(20px) saturate(1.8)",
+          WebkitBackdropFilter: "blur(20px) saturate(1.8)",
+          borderBottom: "1px solid rgba(0,0,0,0.10)",
+          boxShadow: "0 1px 0 rgba(0,0,0,0.04)",
         }}
       >
-        <div className={`mx-auto w-full ${MAX_W} px-5 sm:px-8 h-14 flex items-center justify-between gap-4`}>
+        <div className={`mx-auto w-full ${MAX_W} px-5 sm:px-8 h-16 flex items-center justify-between gap-4`}>
           <LogoMark />
           <div className="flex items-center gap-2">
             <DarkModeToggle />
@@ -438,26 +442,26 @@ export default function AppShell({ children }: { children: ReactNode }) {
       {/* ── Floating bottom nav ── */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 pointer-events-none" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
         <div
-          className="nav-pill pointer-events-auto mx-3 mb-3 rounded-[24px] backdrop-blur-xl"
+          className="nav-pill pointer-events-auto mx-4 mb-4 rounded-[28px] backdrop-blur-xl"
           style={{
-            backgroundColor: "var(--surface-base)",
-            border: "1px solid var(--divider)",
-            boxShadow: "var(--shadow-lg)",
+            backgroundColor: "rgba(255,255,255,0.96)",
+            border: "1px solid rgba(0,0,0,0.08)",
+            boxShadow: "0 8px 36px rgba(0,0,0,0.16), 0 2px 8px rgba(0,0,0,0.08)",
           }}
         >
-          <div className={`mx-auto flex ${MAX_W} items-center justify-around px-2 py-1.5`}>
+          <div className={`mx-auto flex ${MAX_W} items-center justify-around px-3 py-2`}>
             {NAV.map((item) => {
               const active = pathname === item.href;
               return (
                 <Link key={item.href} href={item.href}
-                  className="relative flex flex-col items-center justify-center gap-0.5 px-4 py-2 min-w-[56px]"
+                  className="relative flex flex-col items-center justify-center gap-0.5 px-4 py-1.5 min-w-[60px]"
                   aria-current={active ? "page" : undefined}>
-                  {/* Active indicator: thin top bar */}
+                  {/* Active indicator: pill background behind icon+label */}
                   {active && (
                     <motion.div
-                      layoutId="nav-active-indicator"
-                      className="absolute top-0 rounded-full"
-                      style={{ height: 2, width: 20, left: "50%", transform: "translateX(-50%)", background: "var(--lifeos-pink)" }}
+                      layoutId="nav-active-pill"
+                      className="absolute inset-0 rounded-[16px]"
+                      style={{ background: "rgba(var(--lifeos-pink-rgb), 0.10)" }}
                       transition={{ type: "spring", stiffness: 420, damping: 30 }}
                     />
                   )}
