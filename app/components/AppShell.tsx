@@ -60,16 +60,22 @@ function LogoMark() {
         We show it at 160×50, contain, so the full wordmark is visible.
         The bg of the header is semi-transparent gray so the white canvas blends in.
       */}
+      {/*
+        PNG is 1024×1024 but the actual logo content sits in the center ~60%
+        of the canvas — lots of padding baked in. We oversize the image and use
+        negative margins to pull it tight so the rendered logo looks the right size.
+        mix-blend-mode:multiply kills the white background.
+      */}
       <img
         src="/logo.png"
         alt="OpenHour"
         className="transition-all duration-200 group-hover:scale-105 shrink-0"
         style={{
-          height: 56,
+          height: 110,
           width: "auto",
-          objectFit: "contain",
           display: "block",
           mixBlendMode: "multiply",
+          margin: "-28px -16px -28px -20px",
         }}
         onError={(e) => {
           (e.currentTarget as HTMLImageElement).style.display = "none";
