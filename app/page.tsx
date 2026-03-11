@@ -2968,6 +2968,9 @@ export default function GeneratePage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasUsedOnce, setHasUsedOnce] = useState(() => {
+    try { return !!window.localStorage.getItem("openhour_has_generated_v1"); } catch { return false; }
+  });
 
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<SuggestedBlock[]>([]);
@@ -4008,6 +4011,11 @@ export default function GeneratePage() {
     setLoading(true);
     setError(null);
     posthog.capture("Generate", { inputLength: input.length });
+    // Mark first use so example chips hide permanently
+    if (!hasUsedOnce) {
+      setHasUsedOnce(true);
+      try { window.localStorage.setItem("openhour_has_generated_v1", "1"); } catch { /* ignore */ }
+    }
 
     // Normalize casual/abbreviated input BEFORE any parsing or API call.
     // This converts "tmrw", "gonna", "p.m.", "w/" etc. into clean equivalents.
@@ -4961,8 +4969,8 @@ export default function GeneratePage() {
             }
           />
 
-          {/* Inline example chips — shown inside the card when empty */}
-          {!input && !pendingFile && (
+          {/* Inline example chips — shown inside the card when empty, hidden after first use */}
+          {!input && !pendingFile && !hasUsedOnce && (
             <div className="flex items-center gap-1.5 px-4 pb-3 flex-wrap">
               {[
                 { label: "Essay due midnight + gym", v: "Essay due at midnight, gym this morning, lunch and dinner" },

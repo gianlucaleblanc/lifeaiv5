@@ -54,20 +54,22 @@ function Icon({ name, active }: { name: "spark" | "list" | "calendar" | "user"; 
 // ─────────────────────────────────────────────────────────────
 function LogoMark() {
   return (
-    <Link href="/" className="flex items-center gap-2.5 group select-none">
-      <div
-        className="h-9 w-9 rounded-[12px] grid place-items-center transition-all duration-200 group-hover:scale-105 group-hover:brightness-105"
-        style={{
-          background: "linear-gradient(145deg, #e8758a 0%, var(--lifeos-pink) 55%, #c45870 100%)",
-          boxShadow: "var(--shadow-accent), inset 0 1px 0 rgba(255,255,255,0.25)",
+    <Link href="/" className="flex items-center gap-2 group select-none">
+      {/* Drop your logo as public/logo.png to replace this */}
+      <img
+        src="/logo.png"
+        alt="OpenHour"
+        className="transition-all duration-200 group-hover:scale-105 group-hover:brightness-105"
+        style={{ height: 32, width: "auto", display: "block" }}
+        onError={(e) => {
+          // Fallback: hide broken img and show text logo
+          (e.currentTarget as HTMLImageElement).style.display = "none";
+          const next = e.currentTarget.nextElementSibling as HTMLElement | null;
+          if (next) next.style.display = "flex";
         }}
-      >
-        <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" style={{ width: 18, height: 18 }} fill="none" aria-hidden="true">
-          <circle cx="12" cy="12" r="8" stroke="white" strokeWidth="2" />
-          <path d="M12 8v4l2.5 2.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </div>
-      <div className="flex items-baseline gap-0">
+      />
+      {/* Text fallback (hidden when logo.png loads) */}
+      <div className="items-baseline gap-0" style={{ display: "none" }}>
         <span className="font-black text-black" style={{ fontSize: 20, letterSpacing: "-0.05em" }}>Open</span>
         <span className="font-black" style={{ fontSize: 20, letterSpacing: "-0.05em", color: "var(--lifeos-pink)" }}>Hour</span>
       </div>
