@@ -103,13 +103,24 @@ function sseChunk(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+// ── CORS — allow Chrome extension to call this streaming endpoint ──
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
 // ── POST handler ──────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
   if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
     return new Response(
       `data: ${JSON.stringify({ type: "error", message: "Missing API key (set ANTHROPIC_API_KEY or OPENAI_API_KEY)" })}\n\n`,
-      { status: 500, headers: { "Content-Type": "text/event-stream" } }
+      { status: 500, headers: { "Content-Type": "text/event-stream", ...CORS_HEADERS } }
     );
   }
 
@@ -399,6 +410,7 @@ ${dateMapSection ? `\nCRITICAL: Use DATE MAP above. Every event on its own date.
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       "Connection": "keep-alive",
+      ...CORS_HEADERS,
     },
   });
 }

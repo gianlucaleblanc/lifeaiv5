@@ -408,6 +408,17 @@ async function withTimeout<T>(p: Promise<T>, ms = 12000): Promise<T> {
   ]);
 }
 
+// ── CORS — allow Chrome extension and web app to call this API ──
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -1160,10 +1171,10 @@ if (plan.assumptions.length === 0) {
       hasMeals: /\b(lunch|dinner|breakfast)\b/i.test(input),
     });
 
-    return NextResponse.json(plan);
+    return NextResponse.json(plan, { headers: CORS_HEADERS });
   } catch (err: any) {
     const message =
       typeof err?.message === "string" ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500, headers: CORS_HEADERS });
   }
 }
