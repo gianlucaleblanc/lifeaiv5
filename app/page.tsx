@@ -24,6 +24,7 @@ import {
   buildPreferenceContext,
   loadOnboardingProfile,
   saveOnboardingProfile,
+  hasCompletedOnboarding,
   type OnboardingProfile,
   type CalendarBlock,
   type CalendarMergePreview,
@@ -3046,6 +3047,10 @@ export default function GeneratePage() {
   });
   const [showSignInNudge, setShowSignInNudge] = useState(false);
   const [nudgeAfterCalendar, setNudgeAfterCalendar] = useState(false);
+  // Post-generate preferences mini-card (shown after first generate if no onboarding profile)
+  const [showPrefsCard, setShowPrefsCard] = useState(false);
+  const [prefsWakeHour, setPrefsWakeHour] = useState(7);
+  const [prefsRole, setPrefsRole] = useState("");
 
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<SuggestedBlock[]>([]);
@@ -4090,6 +4095,10 @@ export default function GeneratePage() {
     if (!hasUsedOnce) {
       setHasUsedOnce(true);
       try { window.localStorage.setItem("openhour_has_generated_v1", "1"); } catch { /* ignore */ }
+      // Show the inline preferences card if they haven't set preferences yet
+      if (!hasCompletedOnboarding()) {
+        setShowPrefsCard(true);
+      }
       // After their first generate, nudge unauthenticated users to sign in
       if (!user) {
         setNudgeAfterCalendar(false);
@@ -4522,6 +4531,20 @@ export default function GeneratePage() {
       setNudgeAfterCalendar(true);
       setShowSignInNudge(true);
     }
+  }
+
+  function savePrefsCard(dismiss?: boolean) {
+    setShowPrefsCard(false);
+    if (dismiss) return;
+    // Save with whatever the user selected; fill unasked fields with defaults
+    const profile: OnboardingProfile = {
+      name: "Friend",
+      role: prefsRole || "other",
+      wakeHour: prefsWakeHour,
+      sleepHour: 23,
+      completedAt: new Date().toISOString(),
+    };
+    saveOnboardingProfile(profile);
   }
 
   async function onUploadSyllabus(file: File, yearOverride?: number, sectionOverride?: string) {
@@ -5415,6 +5438,91 @@ export default function GeneratePage() {
                 router.push("/plan");
               }}
             />
+          )}
+        </AnimatePresence>
+
+        {/* ── Post-generate preferences card ── */}
+        <AnimatePresence>
+          {showPrefsCard && (
+            <motion.div
+              initial={{ opacity: 0, y: 12, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.97 }}
+              transition={{ duration: 0.25, ease: "easeOut", delay: 0.4 }}
+              className="mt-4 rounded-2xl border border-black/[0.07] bg-white shadow-[0_4px_24px_rgba(0,0,0,0.07)] overflow-hidden"
+            >
+              {/* Pink top bar */}
+              <div className="h-0.5 w-full bg-gradient-to-r from-[var(--lifeos-pink)] via-[var(--lifeos-pink)]/40 to-transparent" />
+              <div className="px-4 py-4">
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div>
+                    <div className="text-[13px] font-bold text-black" style={{ letterSpacing: "-0.02em" }}>
+                      Quick setup — 2 questions
+                    </div>
+                    <div className="text-[11px] text-black/40 mt-0.5">Helps OpenHour plan around your day</div>
+                  </div>
+                  <button
+                    onClick={() => savePrefsCard(true)}
+                    className="text-black/25 hover:text-black/50 transition-colors mt-0.5"
+                    aria-label="Dismiss"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="w-4 h-4">
+                      <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Wake time */}
+                <div className="mb-4">
+                  <div className="text-[12px] font-semibold text-black/60 mb-1.5">
+                    ⏰ Wake-up time — <span className="text-[var(--lifeos-pink)]">{prefsWakeHour < 12 ? `${prefsWakeHour}:00 AM` : prefsWakeHour === 12 ? "12:00 PM" : `${prefsWakeHour - 12}:00 PM`}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={4} max={12} step={1}
+                    value={prefsWakeHour}
+                    onChange={(e) => setPrefsWakeHour(parseInt(e.target.value, 10))}
+                    className="w-full accent-[var(--lifeos-pink)] h-1.5"
+                  />
+                  <div className="flex justify-between text-[10px] text-black/30 font-medium mt-0.5">
+                    <span>4 AM</span><span>8 AM</span><span>12 PM</span>
+                  </div>
+                </div>
+
+                {/* Role */}
+                <div className="mb-4">
+                  <div className="text-[12px] font-semibold text-black/60 mb-1.5">👤 I am a…</div>
+                  <div className="flex gap-2 flex-wrap">
+                    {[
+                      { value: "student", label: "Student" },
+                      { value: "professional", label: "Professional" },
+                      { value: "entrepreneur", label: "Entrepreneur" },
+                      { value: "other", label: "Other" },
+                    ].map((r) => (
+                      <button
+                        key={r.value}
+                        onClick={() => setPrefsRole(r.value)}
+                        className={
+                          "rounded-xl px-3 py-1.5 text-[12px] font-semibold border transition-all " +
+                          (prefsRole === r.value
+                            ? "border-[var(--lifeos-pink)] bg-[var(--lifeos-pink)]/10 text-[var(--lifeos-pink)]"
+                            : "border-black/10 text-black/50 hover:border-black/20")
+                        }
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => savePrefsCard(false)}
+                  className="w-full rounded-xl bg-black py-2.5 text-[13px] font-bold text-white hover:bg-black/80 active:scale-[0.99] transition-all"
+                >
+                  Save preferences
+                </button>
+              </div>
+            </motion.div>
           )}
         </AnimatePresence>
       </motion.div>
