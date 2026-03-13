@@ -370,6 +370,8 @@ export default function CalendarPage() {
   const [overflowPopover, setOverflowPopover] = useState<string | null>(null);
   // drag preview
   const [dragPreview, setDragPreview] = useState<{ date: string; startMin: number; endMin: number } | null>(null);
+  // Block drag: floating ghost cursor pos + title for the ghost chip
+  const [blockCursorPos, setBlockCursorPos] = useState<{ x: number; y: number; title: string } | null>(null);
   // mobile responsive
   const [isMobile, setIsMobile] = useState(false);
   // series edit modal
@@ -397,7 +399,7 @@ export default function CalendarPage() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const outerScrollRef = useRef<HTMLDivElement | null>(null); // the overflow-x:auto card wrapper
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{ id: string; duration: number; offsetMin: number; moved: boolean } | null>(null);
+  const dragRef = useRef<{ id: string; title: string; duration: number; offsetMin: number; moved: boolean } | null>(null);
 
   const startHour = 6, endHour = 24, stepMin = 10, hourRowPx = 56;
   const gridHeightPx = (endHour - startHour) * hourRowPx;
@@ -580,9 +582,25 @@ export default function CalendarPage() {
     windowDragMove.current = (e: PointerEvent) => {
       const d = dragRef.current;
       if (!d) return;
+      d.moved = true;
+
+      // Update floating ghost cursor pos (title captured at drag start in dragRef)
+      setBlockCursorPos({ x: e.clientX, y: e.clientY, title: d.title });
+
+      // Trash zone detection
+      if (trashRef.current) {
+        const tr = trashRef.current.getBoundingClientRect();
+        const isOverTrash = e.clientX >= tr.left && e.clientX <= tr.right && e.clientY >= tr.top && e.clientY <= tr.bottom;
+        overTrashRef.current = isOverTrash;
+        setOverTrash(isOverTrash);
+        if (isOverTrash) {
+          setDragPreview(null);
+          return;
+        }
+      }
+
       const slot = pointerToSlot(e.clientX, e.clientY);
       if (!slot) return;
-      d.moved = true;
       const startMin = clamp(slot.startMin - d.offsetMin, startHour * 60, endHour * 60 - d.duration);
       const endMin = startMin + d.duration;
       const id = d.id;
@@ -592,8 +610,26 @@ export default function CalendarPage() {
     windowDragUp.current = () => {
       detachWindowDragListeners();
       const d = dragRef.current;
+      setBlockCursorPos(null);
+
       if (!d) return;
       const id = d.id;
+
+      // Trash drop — delete the block
+      if (overTrashRef.current) {
+        overTrashRef.current = false;
+        setOverTrash(false);
+        dragRef.current = null;
+        setDragPreview(null);
+        const blockTitle = d.title || "Block";
+        const updated = deleteCalendarBlock(id);
+        setItems(updated);
+        toast(`🗑️ "${blockTitle}" deleted`, "info");
+        return;
+      }
+      overTrashRef.current = false;
+      setOverTrash(false);
+
       const moved = d.moved;
       dragRef.current = null;
       setDragPreview(null);
@@ -741,7 +777,7 @@ export default function CalendarPage() {
   function onBlockPointerDown(e: React.PointerEvent, b: CalendarBlock) {
     e.preventDefault();
     e.stopPropagation();
-    dragRef.current = { id: b.id, duration: Math.max(10, b.endMin - b.startMin), offsetMin: 0, moved: false };
+    dragRef.current = { id: b.id, title: b.title, duration: Math.max(10, b.endMin - b.startMin), offsetMin: 0, moved: false };
     const slot = pointerToSlot(e.clientX, e.clientY);
     if (slot) dragRef.current.offsetMin = clamp(slot.startMin - b.startMin, -12 * 60, 12 * 60);
     attachWindowDragListeners();
@@ -1721,22 +1757,15 @@ export default function CalendarPage() {
         </AnimatePresence>
       </div>
 
-      {/* ── Drag: floating ghost chip that follows the cursor anywhere on screen ── */}
+      {/* ── Drag: floating ghost chip — todo drag ── */}
       {todoCursorPos && todoDragRef.current && (
         <div
           className="pointer-events-none fixed z-[9999] select-none"
-          style={{
-            left: todoCursorPos.x + 12,
-            top: todoCursorPos.y - 16,
-            transform: "rotate(-2deg)",
-          }}
+          style={{ left: todoCursorPos.x + 12, top: todoCursorPos.y - 16, transform: "rotate(-2deg)" }}
         >
-          <div className={`flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm font-semibold shadow-xl border
-            ${overTrash
-              ? "bg-red-50 border-red-300 text-red-600 scale-110"
-              : "bg-white border-emerald-200 text-emerald-700"
-            }`}
-            style={{ transition: "background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s", boxShadow: overTrash ? "0 8px 24px rgba(239,68,68,0.25)" : "0 8px 24px rgba(0,0,0,0.15)" }}
+          <div className={`flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm font-semibold shadow-xl border transition-all duration-100
+            ${overTrash ? "bg-red-50 border-red-300 text-red-600 scale-110" : "bg-white border-emerald-200 text-emerald-700"}`}
+            style={{ boxShadow: overTrash ? "0 8px 24px rgba(239,68,68,0.25)" : "0 8px 24px rgba(0,0,0,0.15)" }}
           >
             <span>{overTrash ? "🗑️" : "📋"}</span>
             <span className="max-w-[140px] truncate">{todoDragRef.current.title}</span>
@@ -1744,12 +1773,27 @@ export default function CalendarPage() {
         </div>
       )}
 
-      {/* ── Drag: trash zone — appears at bottom-center when dragging a todo ── */}
-      {todoCursorPos && (
+      {/* ── Drag: floating ghost chip — calendar block drag ── */}
+      {blockCursorPos && (
+        <div
+          className="pointer-events-none fixed z-[9999] select-none"
+          style={{ left: blockCursorPos.x + 12, top: blockCursorPos.y - 16, transform: "rotate(-1deg)" }}
+        >
+          <div className={`flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm font-semibold shadow-xl border transition-all duration-100
+            ${overTrash ? "bg-red-50 border-red-300 text-red-600 scale-110" : "bg-white border-black/10 text-black/70"}`}
+            style={{ boxShadow: overTrash ? "0 8px 24px rgba(239,68,68,0.25)" : "0 8px 24px rgba(0,0,0,0.15)" }}
+          >
+            <span>{overTrash ? "🗑️" : "📅"}</span>
+            <span className="max-w-[140px] truncate">{blockCursorPos.title}</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Drag: trash zone — appears when dragging a todo or calendar block ── */}
+      {(todoCursorPos || blockCursorPos) && (
         <div
           ref={trashRef}
           className="pointer-events-none fixed bottom-8 left-1/2 z-[9998] -translate-x-1/2"
-          style={{ transition: "opacity 0.2s, transform 0.2s" }}
         >
           <div className={`flex flex-col items-center gap-1 rounded-2xl border-2 px-6 py-3 backdrop-blur-sm transition-all duration-150
             ${overTrash
