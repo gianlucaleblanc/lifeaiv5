@@ -11,6 +11,7 @@
  */
 
 import {
+  loadCalendar,
   saveCalendar as _saveCalendar,
   saveOnboardingProfile as _saveOnboardingProfile,
   savePreferences as _savePreferences,
@@ -23,11 +24,20 @@ import {
   deleteCalendarBlock as _deleteCalendarBlock,
   deleteCalendarSeries as _deleteCalendarSeries,
   updateCalendarSeries as _updateCalendarSeries,
+  addTodoItem as _addTodoItem,
+  deleteTodoItem as _deleteTodoItem,
+  updateTodoItem as _updateTodoItem,
+  scheduleTodoItem as _scheduleTodoItem,
 } from "./storage";
 
 import { syncCalendar, syncField } from "./cloud-sync";
+import {
+  isGoogleCalendarConnected,
+  createGoogleCalendarEvent,
+  deleteGoogleCalendarEvent,
+} from "./googleCalendar";
 
-import type { CalendarBlock, OnboardingProfile, UserPreferences, HistoryItem, FeedbackEntry, UserProfile } from "./storage";
+import type { CalendarBlock, OnboardingProfile, UserPreferences, HistoryItem, FeedbackEntry, UserProfile, TodoItem } from "./storage";
 
 // ── Auth bridge ───────────────────────────────────────────────────────────
 // AuthProvider calls setCurrentUserId() whenever auth state changes.
@@ -96,11 +106,66 @@ export function saveProfile(p: UserProfile): void {
   }
 }
 
+// ── Google Calendar write-back helpers ───────────────────────────────────
+// Only active when user has enabled "Sync new blocks to Google Calendar"
+// in Settings (UserPreferences.gcalWriteBack === true). Off by default.
+
+/** Convert a CalendarBlock's date + startMin/endMin to ISO strings for GCal */
+function blockToISO(block: CalendarBlock): { startISO: string; endISO: string } {
+  const [y, m, d] = block.date.split("-").map(Number);
+  const startDate = new Date(y, m - 1, d, Math.floor(block.startMin / 60), block.startMin % 60, 0, 0);
+  const endDate   = new Date(y, m - 1, d, Math.floor(block.endMin   / 60), block.endMin   % 60, 0, 0);
+  return { startISO: startDate.toISOString(), endISO: endDate.toISOString() };
+}
+
+function isGCalWriteBackEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = window.localStorage.getItem("openhour_preferences_v1");
+    if (!raw) return false;
+    const prefs = JSON.parse(raw);
+    return prefs?.gcalWriteBack === true;
+  } catch { return false; }
+}
+
+/**
+ * Fire-and-forget: create a Google Calendar event for a block, then
+ * patch the stored block with the returned gcalEventId.
+ * Only runs when GCal is connected AND gcalWriteBack preference is on.
+ */
+export async function pushBlockToGCal(block: CalendarBlock): Promise<void> {
+  if (!isGCalWriteBackEnabled()) return;
+  if (!isGoogleCalendarConnected()) return;
+  const { startISO, endISO } = blockToISO(block);
+  const gcalId = await createGoogleCalendarEvent({
+    title: block.title,
+    startTime: startISO,
+    endTime: endISO,
+    description: (block.meta as { fullDetail?: string } | undefined)?.fullDetail,
+  });
+  if (gcalId) {
+    _updateCalendarBlock(block.id, { gcalEventId: gcalId });
+  }
+}
+
+/**
+ * Fire-and-forget: delete the Google Calendar event for a block if it has one.
+ * Only runs when GCal is connected AND gcalWriteBack preference is on.
+ */
+export async function removeBlockFromGCal(block: CalendarBlock): Promise<void> {
+  if (!block.gcalEventId) return;
+  if (!isGCalWriteBackEnabled()) return;
+  if (!isGoogleCalendarConnected()) return;
+  await deleteGoogleCalendarEvent("primary", block.gcalEventId);
+}
+
 // ── Sync-aware composite calendar mutators ────────────────────────────────
 // These call the original function, then sync the resulting calendar state.
 
 export function addCalendarBlock(block: CalendarBlock): void {
   _addCalendarBlock(block);
+  // Opt-in GCal write-back (only runs if user enabled it in Settings)
+  pushBlockToGCal(block).catch(console.error);
   if (_currentUserId) {
     syncCalendar(_currentUserId).catch(console.error);
   }
@@ -118,6 +183,10 @@ export function updateCalendarBlock(
 }
 
 export function deleteCalendarBlock(id: string): CalendarBlock[] {
+  // Read the block before deleting so we can remove it from GCal
+  const allBefore = loadCalendar();
+  const block = allBefore.find((b) => b.id === id);
+  if (block) removeBlockFromGCal(block).catch(console.error);
   const updated = _deleteCalendarBlock(id);
   if (_currentUserId) {
     syncCalendar(_currentUserId).catch(console.error);
@@ -144,6 +213,40 @@ export function updateCalendarSeries(
   return updated;
 }
 
+// ── To-Do list mutators ───────────────────────────────────────────────────
+
+export function addTodoItem(item: TodoItem): void {
+  _addTodoItem(item);
+  if (_currentUserId) {
+    syncField(_currentUserId, "todos", null).catch(console.error);
+  }
+}
+
+export function deleteTodoItem(id: string): TodoItem[] {
+  const updated = _deleteTodoItem(id);
+  if (_currentUserId) {
+    syncField(_currentUserId, "todos", null).catch(console.error);
+  }
+  return updated;
+}
+
+export function updateTodoItem(id: string, patch: Partial<TodoItem>): TodoItem[] {
+  const updated = _updateTodoItem(id, patch);
+  if (_currentUserId) {
+    syncField(_currentUserId, "todos", null).catch(console.error);
+  }
+  return updated;
+}
+
+export function scheduleTodoItem(
+  id: string,
+  date: string,
+  startMin: number,
+  endMin: number
+): ReturnType<typeof _scheduleTodoItem> {
+  return _scheduleTodoItem(id, date, startMin, endMin);
+}
+
 // ── Re-export everything else from storage.ts unchanged ───────────────────
 
 export {
@@ -155,6 +258,7 @@ export {
   loadCustomEventKeywords,
   loadFeedback,
   loadProfile,
+  loadTodos,
   // Helpers
   addToHistory,
   addFeedback,
@@ -182,6 +286,7 @@ export {
   type FeedbackSignal,
   type CalendarMergePreview,
   type SyllabusEvent,
+  type TodoItem,
   // Constants
   HISTORY_KEY,
   CUSTOM_EVENT_KEYWORDS_KEY,

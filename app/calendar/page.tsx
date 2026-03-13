@@ -10,9 +10,29 @@ import {
   saveCalendar,
   updateCalendarBlock,
   updateCalendarSeries,
+  loadTodos,
+  scheduleTodoItem,
+  deleteTodoItem,
   type CalendarBlock,
+  type TodoItem,
 } from "../lib/storage-sync";
 import { useToast } from "../components/Toast";
+import {
+  isGoogleCalendarConnected,
+  fetchGoogleEventsForWeek,
+  signInWithGoogleCalendar,
+  signOutGoogleCalendar,
+  exchangeCodeForTokens,
+  type GoogleCalendarEvent,
+} from "../lib/googleCalendar";
+import {
+  isOutlookCalendarConnected,
+  fetchOutlookEventsForWeek,
+  signInWithOutlook,
+  signOutOutlook,
+  exchangeOutlookCodeForTokens,
+  type OutlookCalendarEvent,
+} from "../lib/outlookCalendar";
 
 function pad2(n: number) {
   return n.toString().padStart(2, "0");
@@ -65,6 +85,23 @@ function minuteTopPx(mins: number, startHour: number, hourRowPx: number) {
 function truncTitle(title: string, max = 28) {
   const t = title.trim();
   return t.length <= max ? t : t.slice(0, max - 1) + "…";
+}
+
+// ── Conflict detection ────────────────────────────────────────
+function blocksOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number) {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+type ExternalEvent = (GoogleCalendarEvent | OutlookCalendarEvent) & { date: string; startMin: number; endMin: number };
+
+function blockConflictsWithGoogle(block: CalendarBlock, externalEvents: ExternalEvent[]): ExternalEvent | null {
+  if (block.startMin >= 24 * 60) return null; // due-row items can't conflict
+  for (const ge of externalEvents) {
+    if (ge.isAllDay) continue;
+    if (ge.date !== block.date) continue;
+    if (blocksOverlap(block.startMin, block.endMin, ge.startMin, ge.endMin)) return ge;
+  }
+  return null;
 }
 
 type LayoutBlock = CalendarBlock & { col: number; cols: number };
@@ -313,8 +350,12 @@ export default function CalendarPage() {
   });
 
   const [items, setItems] = useState<CalendarBlock[]>([]);
+  const [todos, setTodos] = useState<TodoItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Todo drag state: dragging a todo item onto the calendar grid
+  const todoDragRef = useRef<{ id: string; title: string; durationMin: number; moved: boolean } | null>(null);
+  const [todoDragPreview, setTodoDragPreview] = useState<{ date: string; startMin: number; endMin: number; title: string } | null>(null);
   // viewMode: "week" | "agenda"
   const [viewMode, setViewMode] = useState<"week" | "agenda">("week");
   // detail card: shows quick-view before edit
@@ -337,6 +378,16 @@ export default function CalendarPage() {
   const [draftStart, setDraftStart] = useState(0);
   const [draftEnd, setDraftEnd] = useState(0);
 
+  // Google Calendar integration
+  const [gcalConnected, setGcalConnected] = useState(false);
+  const [googleEvents, setGoogleEvents] = useState<GoogleCalendarEvent[]>([]);
+  const [gcalLoading, setGcalLoading] = useState(false);
+
+  // Outlook Calendar integration
+  const [outlookConnected, setOutlookConnected] = useState(false);
+  const [outlookEvents, setOutlookEvents] = useState<OutlookCalendarEvent[]>([]);
+  const [outlookLoading, setOutlookLoading] = useState(false);
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ id: string; duration: number; offsetMin: number; moved: boolean } | null>(null);
@@ -348,6 +399,7 @@ export default function CalendarPage() {
 
   useEffect(() => {
     setItems(loadCalendar());
+    setTodos(loadTodos());
     setTodayISO(isoDateLocal(new Date()));
     setLoaded(true);
   }, []);
@@ -356,6 +408,7 @@ export default function CalendarPage() {
   useEffect(() => {
     function onCloudSync() {
       setItems(loadCalendar());
+      setTodos(loadTodos());
     }
     window.addEventListener("openhour:cloud-sync", onCloudSync);
     return () => window.removeEventListener("openhour:cloud-sync", onCloudSync);
@@ -373,7 +426,99 @@ export default function CalendarPage() {
     try { window.localStorage.setItem("openhour_calendar_cursor_v1", isoDateLocal(cursor)); } catch { /* ignore */ }
   }, [cursor]);
 
+  // ── Google Calendar: check connection status on mount + handle OAuth callback ──
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const connected = isGoogleCalendarConnected();
+    setGcalConnected(connected);
+
+    // Check if we're returning from Google OAuth (URL has ?gcal_code=...)
+    const params = new URLSearchParams(window.location.search);
+    const gcalCode = params.get("gcal_code");
+    const gcalState = params.get("gcal_state");
+
+    if (gcalCode && gcalState) {
+      // Verify state matches what we saved before redirecting
+      const savedState = localStorage.getItem("openhour_gcal_oauth_state");
+      const codeVerifier = localStorage.getItem("openhour_gcal_code_verifier");
+
+      if (savedState === gcalState && codeVerifier) {
+        const redirectUri = `${window.location.origin}/api/auth/google-calendar/callback`;
+        exchangeCodeForTokens(gcalCode, codeVerifier, redirectUri).then((success) => {
+          // Clean up PKCE state
+          localStorage.removeItem("openhour_gcal_code_verifier");
+          localStorage.removeItem("openhour_gcal_oauth_state");
+          if (success) {
+            setGcalConnected(true);
+            toast("Google Calendar connected!", "success");
+          } else {
+            toast("Failed to connect Google Calendar. Try again.", "error");
+          }
+        });
+      }
+
+      // Remove OAuth params from URL cleanly
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete("gcal_code");
+      cleanUrl.searchParams.delete("gcal_state");
+      window.history.replaceState({}, "", cleanUrl.toString());
+    }
+
+    // ── Outlook Calendar: check connection + handle OAuth callback ──
+    const outlookOk = isOutlookCalendarConnected();
+    setOutlookConnected(outlookOk);
+
+    const outlookCode = params.get("outlook_code");
+    const outlookState = params.get("outlook_state");
+
+    if (outlookCode && outlookState) {
+      const savedOutlookState = localStorage.getItem("openhour_outlook_oauth_state");
+      const outlookVerifier = localStorage.getItem("openhour_outlook_code_verifier");
+
+      if (savedOutlookState === outlookState && outlookVerifier) {
+        const redirectUri = `${window.location.origin}/api/auth/outlook/callback`;
+        exchangeOutlookCodeForTokens(outlookCode, outlookVerifier, redirectUri).then((success) => {
+          localStorage.removeItem("openhour_outlook_code_verifier");
+          localStorage.removeItem("openhour_outlook_oauth_state");
+          if (success) {
+            setOutlookConnected(true);
+            toast("Outlook Calendar connected!", "success");
+          } else {
+            toast("Failed to connect Outlook Calendar. Try again.", "error");
+          }
+        });
+      }
+
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete("outlook_code");
+      cleanUrl.searchParams.delete("outlook_state");
+      window.history.replaceState({}, "", cleanUrl.toString());
+    }
+  }, []);
+
   const weekStart = useMemo(() => startOfWeek(cursor), [cursor]);
+
+  // ── Google Calendar: fetch events whenever week changes ──
+  useEffect(() => {
+    if (!gcalConnected || typeof window === "undefined") return;
+    setGcalLoading(true);
+    fetchGoogleEventsForWeek(weekStart).then((events) => {
+      setGoogleEvents(events);
+      setGcalLoading(false);
+    }).catch(() => setGcalLoading(false));
+  }, [gcalConnected, weekStart]);
+
+  // ── Outlook Calendar: fetch events whenever week changes ──
+  useEffect(() => {
+    if (!outlookConnected || typeof window === "undefined") return;
+    setOutlookLoading(true);
+    fetchOutlookEventsForWeek(weekStart).then((events) => {
+      setOutlookEvents(events);
+      setOutlookLoading(false);
+    }).catch(() => setOutlookLoading(false));
+  }, [outlookConnected, weekStart]);
+
   const visibleDays = isMobile ? 3 : 7;
   const days = useMemo(() => Array.from({ length: visibleDays }, (_, i) => {
     const d = new Date(isMobile ? cursor : weekStart);
@@ -463,6 +608,77 @@ export default function CalendarPage() {
     }
     windowDragMove.current = null;
     windowDragUp.current = null;
+  }
+
+  // ── Todo-drag: drag a todo chip from the sidebar onto the calendar ────────
+  const todoWindowDragMove = useRef<((e: PointerEvent) => void) | null>(null);
+  const todoWindowDragUp = useRef<((e: PointerEvent) => void) | null>(null);
+
+  function attachTodoDragListeners() {
+    todoWindowDragMove.current = (e: PointerEvent) => {
+      const d = todoDragRef.current;
+      if (!d) return;
+      const slot = pointerToSlot(e.clientX, e.clientY);
+      if (!slot) return;
+      d.moved = true;
+      const startMin = clamp(slot.startMin, startHour * 60, endHour * 60 - d.durationMin);
+      const endMin = startMin + d.durationMin;
+      setTodoDragPreview({ date: slot.date, startMin, endMin, title: d.title });
+    };
+    todoWindowDragUp.current = () => {
+      detachTodoDragListeners();
+      const d = todoDragRef.current;
+      if (!d || !todoDragPreview || !d.moved) {
+        todoDragRef.current = null;
+        setTodoDragPreview(null);
+        return;
+      }
+      const { date, startMin, endMin } = todoDragPreview;
+      const id = d.id;
+      todoDragRef.current = null;
+      setTodoDragPreview(null);
+
+      // Remove from todo list, add to calendar
+      const { todo } = scheduleTodoItem(id, date, startMin, endMin);
+      if (!todo) return;
+      const block: CalendarBlock = {
+        id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+        date,
+        title: todo.title,
+        startMin,
+        endMin,
+        meta: { kind: "manual", fullDetail: todo.notes },
+      };
+      addCalendarBlock(block);
+      setItems(loadCalendar());
+      setTodos(loadTodos());
+      toast(`"${todo.title}" scheduled for ${formatDayLabel(new Date(`${date}T12:00:00`))} · ${minsTo12h(startMin)}`, "success");
+    };
+    window.addEventListener("pointermove", todoWindowDragMove.current);
+    window.addEventListener("pointerup", todoWindowDragUp.current);
+    window.addEventListener("pointercancel", todoWindowDragUp.current);
+  }
+
+  function detachTodoDragListeners() {
+    if (todoWindowDragMove.current) window.removeEventListener("pointermove", todoWindowDragMove.current);
+    if (todoWindowDragUp.current) {
+      window.removeEventListener("pointerup", todoWindowDragUp.current);
+      window.removeEventListener("pointercancel", todoWindowDragUp.current);
+    }
+    todoWindowDragMove.current = null;
+    todoWindowDragUp.current = null;
+  }
+
+  function onTodoPointerDown(e: React.PointerEvent, todo: TodoItem) {
+    e.preventDefault();
+    e.stopPropagation();
+    todoDragRef.current = {
+      id: todo.id,
+      title: todo.title,
+      durationMin: todo.durationMin ?? 60,
+      moved: false,
+    };
+    attachTodoDragListeners();
   }
 
   function onBlockPointerDown(e: React.PointerEvent, b: CalendarBlock) {
@@ -660,10 +876,64 @@ export default function CalendarPage() {
                 className="rounded-xl border border-black/[0.07] bg-white py-2 text-xs font-bold text-black/50 hover:bg-black/[0.04] transition-colors">Next →</button>
             </div>
           </div>
+          {/* ── To-Do List Panel ── */}
+          <div className="ui-card p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="ui-eyebrow">To-Do</div>
+              {todos.length > 0 && (
+                <span className="text-[10px] font-bold text-black/30 bg-black/[0.05] rounded-full px-2 py-0.5">{todos.length}</span>
+              )}
+            </div>
+            {todos.length === 0 ? (
+              <div className="text-center py-4">
+                <div className="text-2xl mb-1">📋</div>
+                <p className="text-[11px] font-medium text-black/30 leading-snug">
+                  Not sure when to schedule something?<br />
+                  Use "Not sure yet" when generating a plan.
+                </p>
+              </div>
+            ) : (
+              <ul className="space-y-1.5">
+                {todos.map((todo) => (
+                  <li
+                    key={todo.id}
+                    className="group flex items-center gap-2 rounded-xl border border-black/[0.07] bg-white px-3 py-2 cursor-grab active:cursor-grabbing hover:border-emerald-200 hover:bg-emerald-50/50 transition-all select-none"
+                    title="Drag onto the calendar to schedule"
+                    onPointerDown={(e) => onTodoPointerDown(e, todo)}
+                    style={{ touchAction: "none" }}
+                  >
+                    <span className="text-base flex-shrink-0" aria-hidden>📌</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-semibold text-black/80 truncate">{todo.title}</p>
+                      {todo.durationMin && (
+                        <p className="text-[10px] text-black/35">
+                          ~{todo.durationMin < 60 ? `${todo.durationMin}m` : `${Math.floor(todo.durationMin / 60)}h${todo.durationMin % 60 ? ` ${todo.durationMin % 60}m` : ""}`}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      className="opacity-0 group-hover:opacity-100 text-black/25 hover:text-red-400 transition-all text-xs"
+                      title="Remove from To-Do"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => {
+                        const updated = deleteTodoItem(todo.id);
+                        setTodos(updated);
+                        toast(`"${todo.title}" removed`, "info");
+                      }}
+                    >✕</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-3 text-[10px] text-black/25 text-center">
+              {todos.length > 0 ? "Drag any item onto the calendar to schedule it" : ""}
+            </p>
+          </div>
+
           <div className="ui-card p-5">
             <div className="ui-eyebrow mb-2.5">Tips</div>
             <ul className="space-y-2.5">
-              {["Generate a plan, then tap Add to Calendar.", "Double-click any slot to create a block.", "Drag blocks to reschedule them."].map((tip, i) => (
+              {["Generate a plan, then tap Add to Calendar.", "Double-click any slot to create a block.", "Drag blocks to reschedule them.", "Drag To-Do items onto the grid to schedule them."].map((tip, i) => (
                 <li key={i} className="flex items-start gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
                   <span className="text-[var(--lifeos-pink)] flex-shrink-0 font-bold">✦</span>{tip}
                 </li>
@@ -721,6 +991,66 @@ export default function CalendarPage() {
                 Add
               </button>
 
+              {/* Google Calendar connect/disconnect button */}
+              {gcalConnected ? (
+                <button
+                  onClick={async () => {
+                    await signOutGoogleCalendar();
+                    setGcalConnected(false);
+                    setGoogleEvents([]);
+                    toast("Google Calendar disconnected", "info");
+                  }}
+                  className="h-9 flex items-center gap-1.5 rounded-xl border border-[#4285f4]/30 bg-[#e8f0fe] px-3 text-xs font-bold text-[#4285f4] hover:bg-[#d2e3fc] hover:scale-[1.02] active:scale-[0.97] transition-all"
+                  title="Google Calendar connected — click to disconnect"
+                >
+                  <span className="font-extrabold text-[10px] bg-[#4285f4] text-white rounded px-1 py-0.5">G</span>
+                  {gcalLoading ? "Syncing…" : "Connected"}
+                </button>
+              ) : (
+                <button
+                  onClick={async () => {
+                    setGcalLoading(true);
+                    await signInWithGoogleCalendar();
+                  }}
+                  disabled={gcalLoading}
+                  className="h-9 flex items-center gap-1.5 rounded-xl border border-black/[0.08] bg-white px-3 text-xs font-bold text-black/55 hover:bg-black/[0.04] hover:scale-[1.02] active:scale-[0.97] transition-all disabled:opacity-50"
+                  title="Connect Google Calendar"
+                >
+                  <span className="font-extrabold text-[10px] bg-[#4285f4] text-white rounded px-1 py-0.5">G</span>
+                  {gcalLoading ? "Connecting…" : "Connect Google"}
+                </button>
+              )}
+
+              {/* Outlook Calendar connect/disconnect button */}
+              {outlookConnected ? (
+                <button
+                  onClick={async () => {
+                    await signOutOutlook();
+                    setOutlookConnected(false);
+                    setOutlookEvents([]);
+                    toast("Outlook Calendar disconnected", "info");
+                  }}
+                  className="h-9 flex items-center gap-1.5 rounded-xl border border-[#0078d4]/30 bg-[#deecf9] px-3 text-xs font-bold text-[#0078d4] hover:bg-[#c7e0f4] hover:scale-[1.02] active:scale-[0.97] transition-all"
+                  title="Outlook Calendar connected — click to disconnect"
+                >
+                  <span className="font-extrabold text-[10px] bg-[#0078d4] text-white rounded px-1 py-0.5">M</span>
+                  {outlookLoading ? "Syncing…" : "Connected"}
+                </button>
+              ) : (
+                <button
+                  onClick={async () => {
+                    setOutlookLoading(true);
+                    await signInWithOutlook();
+                  }}
+                  disabled={outlookLoading}
+                  className="h-9 flex items-center gap-1.5 rounded-xl border border-black/[0.08] bg-white px-3 text-xs font-bold text-black/55 hover:bg-black/[0.04] hover:scale-[1.02] active:scale-[0.97] transition-all disabled:opacity-50"
+                  title="Connect Outlook Calendar"
+                >
+                  <span className="font-extrabold text-[10px] bg-[#0078d4] text-white rounded px-1 py-0.5">M</span>
+                  {outlookLoading ? "Connecting…" : "Connect Outlook"}
+                </button>
+              )}
+
               {/* Export .ics button */}
               <button
                 onClick={() => { exportIcal(items); toast("Calendar exported as .ics", "success"); }}
@@ -772,16 +1102,18 @@ export default function CalendarPage() {
                       const customColor = (b.meta as any)?.color as string | undefined;
                       const { cls, style } = blockColors(kind, customColor);
                       const isDue = b.startMin >= 23 * 60;
+                      const conflictGe = blockConflictsWithGoogle(b, [...googleEvents, ...outlookEvents] as ExternalEvent[]);
                       return (
                         <button
                           key={b.id}
                           onClick={() => openDetail(b.id)}
-                          className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-black/[0.02] active:bg-black/[0.04] transition-colors group"
+                          className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-black/[0.02] active:bg-black/[0.04] transition-colors group ${conflictGe ? "bg-orange-50/60 border-l-2 border-orange-400" : ""}`}
                         >
-                          <div className={`flex-shrink-0 h-2 w-2 rounded-full ${dotColor(kind)}`} />
+                          <div className={`flex-shrink-0 h-2 w-2 rounded-full ${conflictGe ? "bg-orange-400" : dotColor(kind)}`} />
                           <div className="flex-1 min-w-0">
                             <div className="text-sm font-semibold text-black/80 truncate">{b.title}</div>
                             <div className="text-xs text-black/35">{isDue ? "Due" : `${minsTo12h(b.startMin)} – ${minsTo12h(b.endMin)}`}</div>
+                            {conflictGe && <div className="text-[10px] text-orange-500 font-semibold">⚠️ Conflicts with &ldquo;{conflictGe.title}&rdquo;</div>}
                           </div>
                           {kind && <span className={`text-[10px] font-bold flex-shrink-0 px-2 py-0.5 rounded-full border ${cls}`} style={style}>{kind}</span>}
                           <span className="text-black/20 group-hover:text-black/50 transition-colors flex-shrink-0">›</span>
@@ -797,6 +1129,29 @@ export default function CalendarPage() {
           {/* ── WEEK VIEW ── */}
           {viewMode === "week" && (
             <>
+              {/* ── Conflict banner ── */}
+              {(() => {
+                const allExternal = [...googleEvents, ...outlookEvents] as ExternalEvent[];
+                const conflicts = weekBlocks.filter((b) => blockConflictsWithGoogle(b, allExternal));
+                if (conflicts.length === 0) return null;
+                const hasGoogle = googleEvents.length > 0;
+                const hasOutlook = outlookEvents.length > 0;
+                const calLabel = hasGoogle && hasOutlook ? "Google / Outlook Calendar" : hasOutlook ? "Outlook Calendar" : "Google Calendar";
+                return (
+                  <div className="mb-3 flex items-center gap-2.5 rounded-xl border border-orange-200 bg-orange-50 px-4 py-2.5">
+                    <span className="text-base flex-shrink-0">⚠️</span>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-bold text-orange-700">
+                        {conflicts.length} block{conflicts.length !== 1 ? "s overlap" : " overlaps"} with {calLabel}
+                      </span>
+                      <span className="ml-2 text-xs text-orange-500">
+                        {conflicts.map((b) => `"${b.title}"`).join(", ")}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Outer card — overflow-x scroll so columns never squish below minDayColPx */}
               <div className="rounded-2xl overflow-x-auto overflow-y-hidden" style={{ border: "1px solid var(--divider)", background: "var(--surface-raised)", boxShadow: "var(--shadow-sm)" }}>
                 {/* Inner min-width wrapper so the grid can exceed the card width */}
@@ -901,13 +1256,24 @@ export default function CalendarPage() {
                                     className={`border-b ${h % 2 === 0 ? "border-black/[0.05]" : "border-black/[0.025]"}`} />
                                 ))}
 
-                                {/* Drag preview ghost */}
+                                {/* Drag preview ghost — block being moved */}
                                 {dragPreview && dragPreview.date === date && (
                                   <div className="absolute pointer-events-none z-20 left-1 right-1 rounded-lg border-2 border-dashed border-[var(--lifeos-pink)] bg-[var(--lifeos-pink)]/10"
                                     style={{
                                       top: minuteTopPx(dragPreview.startMin, startHour, hourRowPx),
                                       height: Math.max(20, minuteTopPx(dragPreview.endMin, startHour, hourRowPx) - minuteTopPx(dragPreview.startMin, startHour, hourRowPx)),
                                     }} />
+                                )}
+
+                                {/* Todo drag ghost — todo item being dragged from sidebar */}
+                                {todoDragPreview && todoDragPreview.date === date && (
+                                  <div className="absolute pointer-events-none z-20 left-1 right-1 rounded-lg border-2 border-dashed border-emerald-400 bg-emerald-50/80 flex items-center px-2"
+                                    style={{
+                                      top: minuteTopPx(todoDragPreview.startMin, startHour, hourRowPx),
+                                      height: Math.max(24, minuteTopPx(todoDragPreview.endMin, startHour, hourRowPx) - minuteTopPx(todoDragPreview.startMin, startHour, hourRowPx)),
+                                    }}>
+                                    <span className="text-[11px] font-bold text-emerald-700 truncate">📋 {todoDragPreview.title}</span>
+                                  </div>
                                 )}
 
                                 {/* Blocks — each laid out with real col/cols positioning */}
@@ -922,6 +1288,7 @@ export default function CalendarPage() {
                                     const customColor = (b.meta as any)?.color as string | undefined;
                                     const { cls: blockColor, style: blockStyle } = blockColors(kind, customColor);
                                     const isDragging = dragRef.current?.id === b.id;
+                                    const conflictGe = blockConflictsWithGoogle(b, [...googleEvents, ...outlookEvents] as ExternalEvent[]);
 
                                     // Compact mode when column is narrow (≤ minDayColPx px per lane)
                                     const laneWidthPx = minDayColPx / b.cols;
@@ -944,19 +1311,100 @@ export default function CalendarPage() {
                                         }}>
                                         <div
                                           data-block
-                                          className={`w-full h-full cursor-grab select-none overflow-hidden rounded-lg border text-left transition-all hover:shadow-md hover:scale-[1.02] active:cursor-grabbing active:scale-[0.98] ${blockColor} ${isDragging ? "opacity-60 shadow-lg" : ""} ${compact ? "p-0.5" : "p-1"}`}
-                                          style={{ ...blockStyle, touchAction: "none" }}
-                                          title={b.meta?.fullDetail ? `${b.title}\n${b.meta.fullDetail}` : b.title}
+                                          className={`w-full h-full cursor-grab select-none overflow-hidden rounded-lg border text-left transition-all hover:shadow-md hover:scale-[1.02] active:cursor-grabbing active:scale-[0.98] ${blockColor} ${isDragging ? "opacity-60 shadow-lg" : ""} ${compact ? "p-0.5" : "p-1"} ${conflictGe ? "ring-2 ring-orange-400 ring-offset-0" : ""}`}
+                                          style={{
+                                            ...blockStyle,
+                                            touchAction: "none",
+                                            ...(conflictGe ? { boxShadow: "inset 3px 0 0 #f97316" } : {}),
+                                          }}
+                                          title={conflictGe ? `⚠️ Conflicts with "${conflictGe.title}" in Google Calendar` : (b.meta?.fullDetail ? `${b.title}\n${b.meta.fullDetail}` : b.title)}
                                           onPointerDown={(e) => onBlockPointerDown(e, b)}
                                           onClick={() => !dragRef.current?.moved && openDetail(b.id)}
                                         >
-                                          <div className={`truncate font-bold leading-tight ${compact ? "text-[9px]" : "text-[10px]"}`}>{short}</div>
+                                          <div className={`flex items-center gap-0.5 min-w-0`}>
+                                            {conflictGe && <span className="flex-shrink-0 text-[9px]">⚠️</span>}
+                                            <div className={`truncate font-bold leading-tight flex-1 ${compact ? "text-[9px]" : "text-[10px]"}`}>{short}</div>
+                                          </div>
                                           {!compact && heightPx >= 32 && <div className="mt-0.5 text-[9px] opacity-60 leading-tight truncate">{timeLabel}</div>}
                                         </div>
                                       </div>
                                     );
                                   });
                                 })()}
+
+                                {/* Google Calendar events (read-only overlay) */}
+                                {googleEvents
+                                  .filter((ge) => ge.date === isoDateLocal(d) && !ge.isAllDay && ge.startMin < 24 * 60)
+                                  .map((ge) => {
+                                    const topPx = minuteTopPx(ge.startMin, startHour, hourRowPx);
+                                    const heightPx = Math.max(20, minuteTopPx(ge.endMin, startHour, hourRowPx) - topPx);
+                                    const showCal = heightPx >= 36;
+                                    const bgColor = (ge.color ?? "#4285f4") + "22";
+                                    const borderColor = ge.color ?? "#4285f4";
+                                    return (
+                                      <div
+                                        key={ge.id}
+                                        className="absolute pointer-events-none overflow-hidden rounded-md"
+                                        style={{
+                                          top: topPx,
+                                          height: heightPx,
+                                          left: 2,
+                                          right: 2,
+                                          zIndex: 5,
+                                          background: bgColor,
+                                          borderLeft: `3px solid ${borderColor}`,
+                                          padding: "2px 4px",
+                                          opacity: 0.85,
+                                        }}
+                                        title={`${ge.title}${ge.calendarName ? ` · ${ge.calendarName}` : ""}`}
+                                      >
+                                        <div className="flex items-center gap-1 min-w-0">
+                                          <span className="truncate text-[9px] font-bold text-gray-700 flex-1 leading-tight">{ge.title}</span>
+                                          <span className="flex-shrink-0 text-[7px] font-extrabold text-[#4285f4] bg-[#e8f0fe] rounded px-0.5 leading-tight">G</span>
+                                        </div>
+                                        {showCal && ge.calendarName && (
+                                          <div className="text-[8px] text-gray-400 truncate leading-tight mt-0.5">{ge.calendarName}</div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+
+                                {/* Outlook Calendar events (read-only overlay) */}
+                                {outlookEvents
+                                  .filter((oe) => oe.date === isoDateLocal(d) && !oe.isAllDay && oe.startMin < 24 * 60)
+                                  .map((oe) => {
+                                    const topPx = minuteTopPx(oe.startMin, startHour, hourRowPx);
+                                    const heightPx = Math.max(20, minuteTopPx(oe.endMin, startHour, hourRowPx) - topPx);
+                                    const showCal = heightPx >= 36;
+                                    const bgColor = (oe.color ?? "#0078d4") + "22";
+                                    const borderColor = oe.color ?? "#0078d4";
+                                    return (
+                                      <div
+                                        key={oe.id}
+                                        className="absolute pointer-events-none overflow-hidden rounded-md"
+                                        style={{
+                                          top: topPx,
+                                          height: heightPx,
+                                          left: 2,
+                                          right: 2,
+                                          zIndex: 5,
+                                          background: bgColor,
+                                          borderLeft: `3px solid ${borderColor}`,
+                                          padding: "2px 4px",
+                                          opacity: 0.85,
+                                        }}
+                                        title={`${oe.title}${oe.calendarName ? ` · ${oe.calendarName}` : ""}`}
+                                      >
+                                        <div className="flex items-center gap-1 min-w-0">
+                                          <span className="truncate text-[9px] font-bold text-gray-700 flex-1 leading-tight">{oe.title}</span>
+                                          <span className="flex-shrink-0 text-[7px] font-extrabold text-[#0078d4] bg-[#deecf9] rounded px-0.5 leading-tight">M</span>
+                                        </div>
+                                        {showCal && oe.calendarName && (
+                                          <div className="text-[8px] text-gray-400 truncate leading-tight mt-0.5">{oe.calendarName}</div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
                               </div>
                             );
                           })}

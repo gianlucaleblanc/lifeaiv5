@@ -245,6 +245,8 @@ export type UserPreferences = {
   suggestionsEnabled: boolean;         // whether to show AI prep suggestions after scheduling
   notificationsEnabled: boolean;       // 15-min browser reminders for today's events
   suggestPrefs: Record<string, boolean>; // per-context suggestion opt-in/out e.g. { workout: true, coffee: false }
+  gcalWriteBack: boolean;              // write new OpenHour blocks back to Google Calendar (off by default)
+  outlookWriteBack: boolean;           // write new OpenHour blocks back to Outlook Calendar (off by default)
 
   // Meta
   totalFeedbackSessions: number;
@@ -266,6 +268,8 @@ export function loadPreferences(): UserPreferences {
     suggestionsEnabled: true,
     notificationsEnabled: false,
     suggestPrefs: {},
+    gcalWriteBack: false,
+    outlookWriteBack: false,
     totalFeedbackSessions: 0,
     lastUpdated: new Date().toISOString(),
   };
@@ -418,6 +422,7 @@ export type CalendarBlock = {
   startMin: number; // minutes from 00:00
   endMin: number; // minutes from 00:00
   sourceHistoryId?: string;
+  gcalEventId?: string; // Google Calendar event ID (set after write-back)
   meta?: {
     kind?: "plan" | "syllabus" | "manual";
     confidence?: number;
@@ -528,6 +533,74 @@ export function updateCalendarSeries(
   });
   saveCalendar(updated);
   return updated;
+}
+
+// ------------------------------
+// To-Do List (unscheduled items)
+// ------------------------------
+
+export type TodoItem = {
+  id: string;
+  title: string;
+  emoji?: string;
+  durationMin?: number;   // estimated duration in minutes
+  notes?: string;
+  createdAt: string;      // ISO string
+  sourceHistoryId?: string;
+};
+
+const TODO_KEY = "openhour_todos_v1";
+
+export function loadTodos(): TodoItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(TODO_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as TodoItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveTodos(items: TodoItem[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TODO_KEY, JSON.stringify(items));
+  } catch {
+    // ignore quota errors
+  }
+}
+
+export function addTodoItem(item: TodoItem): void {
+  const items = loadTodos();
+  saveTodos([item, ...items]);
+}
+
+export function deleteTodoItem(id: string): TodoItem[] {
+  const updated = loadTodos().filter((t) => t.id !== id);
+  saveTodos(updated);
+  return updated;
+}
+
+export function updateTodoItem(id: string, patch: Partial<TodoItem>): TodoItem[] {
+  const updated = loadTodos().map((t) => (t.id === id ? { ...t, ...patch } : t));
+  saveTodos(updated);
+  return updated;
+}
+
+// Convenience: move a todo to the calendar (removes from todo list, returns the new CalendarBlock data)
+export function scheduleTodoItem(
+  id: string,
+  date: string,
+  startMin: number,
+  endMin: number
+): { todo: TodoItem | null; remaining: TodoItem[] } {
+  const items = loadTodos();
+  const todo = items.find((t) => t.id === id) ?? null;
+  const remaining = items.filter((t) => t.id !== id);
+  saveTodos(remaining);
+  return { todo, remaining };
 }
 
 function normalizeTitle(s: string) {

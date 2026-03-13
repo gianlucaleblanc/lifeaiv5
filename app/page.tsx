@@ -34,6 +34,9 @@ import {
   type FeedbackSignal,
   type FeedbackEntry,
   type UserPreferences,
+  addTodoItem,
+  loadTodos,
+  type TodoItem,
 } from "./lib/storage-sync";
 import { fullyPreprocess } from "./lib/nlp-preprocess";
 import {
@@ -41,6 +44,14 @@ import {
   rebuildAndSaveSmartProfile,
   formatSmartProfileForPrompt,
 } from "./lib/user-learning-profile";
+import {
+  isGoogleCalendarConnected,
+  fetchTodayGoogleEvents,
+} from "./lib/googleCalendar";
+import {
+  isOutlookCalendarConnected,
+  fetchTodayOutlookEvents,
+} from "./lib/outlookCalendar";
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -53,6 +64,24 @@ type SuggestedBlock = {
   kind: string;
   reason?: string;
 };
+
+// Detect when the AI could not confidently pin down a time for a block.
+// Signals used to flag this:
+//   • startMin === endMin (zero-duration — AI had no time info)
+//   • startMin is exactly on a round hour with endMin = startMin + 60 (generic 1-hour placeholder)
+//   • The block title contains vague time words from the original prompt
+const VAGUE_TITLE_PATTERNS = /\b(sometime|later|eventually|not sure|whenever|any ?time|tbd|to ?be ?determined|flexible)\b/i;
+
+function isVagueTime(block: { title: string; startMin: number; endMin: number }): boolean {
+  if (VAGUE_TITLE_PATTERNS.test(block.title)) return true;
+  if (block.startMin === block.endMin) return true;
+  return false;
+}
+
+// Check the raw user input for vague scheduling language
+function inputHasVagueTime(text: string): boolean {
+  return /\b(sometime|not sure when|don'?t know when|whenever|any ?time|tbd|to ?be ?determined|flexible|not scheduled|haven'?t decided)\b/i.test(text);
+}
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -163,6 +192,158 @@ function useRotatingPlaceholder(interval = 3200) {
     return () => clearInterval(t);
   }, [interval]);
   return PLACEHOLDER_EXAMPLES[idx];
+}
+
+// ── Morning Briefing card ─────────────────────────────────────
+function MorningBriefing() {
+  const [data, setData] = useState<{
+    greeting: string;
+    dateLabel: string;
+    todayCount: number;
+    nextBlock: { title: string; time: string } | null;
+    conflictCount: number;
+    gcalCount: number;
+    outlookCount: number;
+  } | null>(null);
+
+  useEffect(() => {
+    async function build() {
+      const now = new Date();
+      const hour = now.getHours();
+
+      // Greeting
+      const greeting =
+        hour < 12 ? "Good morning" :
+        hour < 17 ? "Good afternoon" :
+        "Good evening";
+
+      // Date label
+      const dateLabel = now.toLocaleDateString(undefined, {
+        weekday: "long", month: "long", day: "numeric",
+      });
+
+      // Today's blocks from localStorage
+      const todayISO = now.toLocaleDateString("en-CA"); // YYYY-MM-DD
+      const allBlocks = loadCalendar();
+      const todayBlocks = allBlocks
+        .filter((b) => b.date === todayISO && b.startMin < 23 * 60)
+        .sort((a, b) => a.startMin - b.startMin);
+      const nowMins = hour * 60 + now.getMinutes();
+      const nextBlock = todayBlocks.find((b) => b.startMin > nowMins) ?? null;
+
+      function fmtMins(m: number) {
+        const h = Math.floor(m / 60);
+        const min = m % 60;
+        const ampm = h < 12 ? "AM" : "PM";
+        return `${h % 12 || 12}:${String(min).padStart(2, "0")} ${ampm}`;
+      }
+
+      // Google Calendar events today
+      let gcalCount = 0;
+      let outlookCount = 0;
+      let conflictCount = 0;
+      try {
+        if (isGoogleCalendarConnected()) {
+          const gevents = await fetchTodayGoogleEvents();
+          const timed = gevents.filter((e) => !e.isAllDay);
+          gcalCount = timed.length;
+          // Count conflicts with today's OpenHour blocks
+          conflictCount += todayBlocks.filter((b) =>
+            timed.some((ge) => b.startMin < ge.endMin && ge.startMin < b.endMin)
+          ).length;
+        }
+      } catch { /* GCal not connected — ignore */ }
+
+      try {
+        if (isOutlookCalendarConnected()) {
+          const oevents = await fetchTodayOutlookEvents();
+          const timed = oevents.filter((e) => !e.isAllDay);
+          outlookCount = timed.length;
+          // Count conflicts with today's OpenHour blocks (add to existing count)
+          conflictCount += todayBlocks.filter((b) =>
+            timed.some((oe) => b.startMin < oe.endMin && oe.startMin < b.endMin)
+          ).length;
+        }
+      } catch { /* Outlook not connected — ignore */ }
+
+      setData({
+        greeting,
+        dateLabel,
+        todayCount: todayBlocks.length,
+        nextBlock: nextBlock ? { title: nextBlock.title, time: fmtMins(nextBlock.startMin) } : null,
+        conflictCount,
+        gcalCount,
+        outlookCount,
+      });
+    }
+    build();
+  }, []);
+
+  if (!data) return null;
+  // Only show if there's something interesting to display
+  if (data.todayCount === 0 && data.gcalCount === 0 && data.outlookCount === 0) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: "easeOut", delay: 0.18 }}
+      className="mt-4 w-full max-w-xl rounded-2xl border border-black/[0.07] bg-white/80 backdrop-blur-sm px-5 py-4 shadow-sm text-left"
+    >
+      {/* Greeting row */}
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-[13px] font-extrabold text-black/80">{data.greeting} ☀️</div>
+          <div className="text-[11px] text-black/35 mt-0.5">{data.dateLabel}</div>
+        </div>
+        {data.todayCount > 0 && (
+          <div className="flex-shrink-0 rounded-xl bg-[var(--lifeos-pink)]/10 px-3 py-1 text-center">
+            <div className="text-[18px] font-black text-[var(--lifeos-pink)] leading-none">{data.todayCount}</div>
+            <div className="text-[9px] font-bold text-[var(--lifeos-pink)]/70 mt-0.5 uppercase tracking-wide">today</div>
+          </div>
+        )}
+      </div>
+
+      {/* Divider */}
+      <div className="my-3 border-t border-black/[0.05]" />
+
+      {/* Stats row */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {data.nextBlock && (
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span className="text-base">⏱</span>
+            <span className="font-semibold text-black/70">Next:</span>
+            <span className="text-black/50 truncate max-w-[160px]">{data.nextBlock.title}</span>
+            <span className="font-bold text-[var(--lifeos-pink)]">@ {data.nextBlock.time}</span>
+          </div>
+        )}
+        {!data.nextBlock && data.todayCount > 0 && (
+          <div className="flex items-center gap-1.5 text-[11px] text-black/40">
+            <span>✓</span>
+            <span>All done for today</span>
+          </div>
+        )}
+        {data.gcalCount > 0 && (
+          <div className="flex items-center gap-1 text-[11px] text-[#4285f4] font-semibold">
+            <span className="text-[10px] font-extrabold text-[#4285f4] bg-[#e8f0fe] rounded px-0.5">G</span>
+            <span>{data.gcalCount} Google event{data.gcalCount !== 1 ? "s" : ""}</span>
+          </div>
+        )}
+        {data.outlookCount > 0 && (
+          <div className="flex items-center gap-1 text-[11px] text-[#0078d4] font-semibold">
+            <span className="text-[10px] font-extrabold text-[#0078d4] bg-[#deecf9] rounded px-0.5">M</span>
+            <span>{data.outlookCount} Outlook event{data.outlookCount !== 1 ? "s" : ""}</span>
+          </div>
+        )}
+        {data.conflictCount > 0 && (
+          <div className="flex items-center gap-1 text-[11px] text-orange-500 font-semibold">
+            <span>⚠️</span>
+            <span>{data.conflictCount} conflict{data.conflictCount !== 1 ? "s" : ""}</span>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
 }
 
 // ── Streak display ─────────────────────────────────────────────
@@ -3296,10 +3477,31 @@ export default function GeneratePage() {
     setLoading(true);
     setError(null);
     try {
+      // Inject Google Calendar events for Day Plan too
+      let dayPlanInput = richInput;
+      try {
+        if (isGoogleCalendarConnected()) {
+          const gcalEvents = await fetchTodayGoogleEvents();
+          const timedEvents = gcalEvents.filter((e) => !e.isAllDay);
+          if (timedEvents.length > 0) {
+            const minsTo12h = (m: number) => {
+              const h = Math.floor(m / 60) % 12 || 12;
+              const min = String(m % 60).padStart(2, "0");
+              const ampm = Math.floor(m / 60) < 12 ? "AM" : "PM";
+              return `${h}:${min} ${ampm}`;
+            };
+            const eventList = timedEvents
+              .map((e) => `- ${e.title} (${minsTo12h(e.startMin)}–${minsTo12h(e.endMin)})`)
+              .join("\n");
+            dayPlanInput = `${richInput}\n\nMy existing Google Calendar events today (do NOT schedule over these):\n${eventList}`;
+          }
+        }
+      } catch { /* best-effort */ }
+
       const res = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: richInput, preferenceContext: getPreferenceContext(), timezone: getUserTimezone(), recentHistory: getRecentHistoryContext(), smartProfile: getSmartProfileString(), calendarContext: loadCalendar().slice(0, 50) }),
+        body: JSON.stringify({ input: dayPlanInput, preferenceContext: getPreferenceContext(), timezone: getUserTimezone(), recentHistory: getRecentHistoryContext(), smartProfile: getSmartProfileString(), calendarContext: loadCalendar().slice(0, 50) }),
       });
       const data = (await res.json()) as Plan & { error?: string };
       if (!res.ok) throw new Error((data as any)?.error ?? "Request failed");
@@ -4343,11 +4545,35 @@ export default function GeneratePage() {
 
       // Fall through to planning API — use streaming endpoint for progressive coach display
       setStreamingCoach(""); // reset
+
+      // Inject Google Calendar events as context so AI schedules around existing meetings
+      let enrichedInput = ni;
+      try {
+        if (isGoogleCalendarConnected()) {
+          const gcalEvents = await fetchTodayGoogleEvents();
+          const timedEvents = gcalEvents.filter((e) => !e.isAllDay);
+          if (timedEvents.length > 0) {
+            const minsTo12h = (m: number) => {
+              const h = Math.floor(m / 60) % 12 || 12;
+              const min = String(m % 60).padStart(2, "0");
+              const ampm = Math.floor(m / 60) < 12 ? "AM" : "PM";
+              return `${h}:${min} ${ampm}`;
+            };
+            const eventList = timedEvents
+              .map((e) => `- ${e.title} (${minsTo12h(e.startMin)}–${minsTo12h(e.endMin)})`)
+              .join("\n");
+            enrichedInput = `${ni}\n\nMy existing Google Calendar events today (do NOT schedule over these):\n${eventList}`;
+          }
+        }
+      } catch {
+        // best-effort — fall back to original input
+      }
+
       const streamRes = await fetch("/api/plan/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          input: ni,
+          input: enrichedInput,
           preferenceContext: getPreferenceContext(),
           timezone: getUserTimezone(),
           recentHistory: getRecentHistoryContext(),
@@ -4531,6 +4757,39 @@ export default function GeneratePage() {
       setNudgeAfterCalendar(true);
       setShowSignInNudge(true);
     }
+  }
+
+  // ── Add unscheduled blocks to To-Do list ───────────────────
+  function confirmAddToTodo() {
+    if (!planPreview) return;
+    let count = 0;
+    planPreview.proposed.forEach((b, i) => {
+      if (!planKeep[i]) return; // skip unchecked blocks
+      const title = (planTitles[i] ?? b.title).trim();
+      if (!title) return;
+      const durationMin = b.endMin > b.startMin ? b.endMin - b.startMin : 60;
+      const todo: TodoItem = {
+        id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+        title,
+        emoji: undefined,
+        durationMin,
+        notes: b.meta?.fullDetail,
+        createdAt: new Date().toISOString(),
+        sourceHistoryId: pendingHistory?.id,
+      };
+      addTodoItem(todo);
+      count++;
+    });
+    posthog.capture("AddToTodo", { itemsAdded: count });
+    toast(`✓ ${count} item${count !== 1 ? "s" : ""} added to your To-Do list`, "success");
+    setPlanPreview(null);
+    setPendingHistory(null);
+    setPlanKeep({});
+    setPlanTitles({});
+    setPlanDates({});
+    setPlanStarts({});
+    setPlanEnds({});
+    setPlanExpandedRow(null);
   }
 
   function savePrefsCard(dismiss?: boolean) {
@@ -5025,6 +5284,9 @@ export default function GeneratePage() {
           />
         )}
       </div>
+
+      {/* ── Morning Briefing ── */}
+      <MorningBriefing />
 
       {/* ── Input card ── */}
       <motion.div
@@ -6809,6 +7071,13 @@ export default function GeneratePage() {
                   className="rounded-xl border border-black/[0.08] bg-white px-4 py-2 text-sm font-semibold text-black/60 hover:bg-black/[0.04] transition-colors"
                 >
                   Cancel
+                </button>
+                <button
+                  onClick={confirmAddToTodo}
+                  title="Not sure when? Save to your To-Do list and drag onto the calendar later"
+                  className="rounded-xl border border-black/[0.10] bg-white px-4 py-2 text-sm font-semibold text-black/60 hover:bg-black/[0.04] transition-colors flex items-center gap-1.5"
+                >
+                  <span>📋</span> Not sure yet
                 </button>
                 <button
                   onClick={confirmPlanImport}

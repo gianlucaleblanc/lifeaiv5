@@ -41,7 +41,8 @@ type CloudField =
   | "history"
   | "custom_keywords"
   | "feedback"
-  | "profile_stats";
+  | "profile_stats"
+  | "todos";
 
 // ── Merge helpers ─────────────────────────────────────────────────────────
 

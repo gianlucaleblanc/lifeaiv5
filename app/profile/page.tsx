@@ -5,6 +5,8 @@ import { loadPreferences, loadProfile, savePreferences, loadOnboardingProfile, t
 import { useToast } from "../components/Toast";
 import { applyAccentDarkAttribute } from "../components/AppShell";
 import { useAuth } from "../components/AuthProvider";
+import { isGoogleCalendarConnected } from "../lib/googleCalendar";
+import { isOutlookCalendarConnected } from "../lib/outlookCalendar";
 
 // ── Profile Picture Component ────────────────────────────────
 function ProfilePicture({
@@ -195,10 +197,14 @@ export default function ProfilePage() {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [showSoonExpanded, setShowSoonExpanded] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [gcalConnected, setGcalConnected] = useState(false);
+  const [outlookConnected, setOutlookConnected] = useState(false);
 
   useEffect(() => {
     setProfile(loadProfile());
     setPrefs(loadPreferences());
+    setGcalConnected(isGoogleCalendarConnected());
+    setOutlookConnected(isOutlookCalendarConnected());
     // Load user's name from onboarding
     const onboarding = loadOnboardingProfile();
     if (onboarding?.name && onboarding.name !== "Friend") {
@@ -246,7 +252,7 @@ export default function ProfilePage() {
     avgPct >= 45 ? "You're building momentum — make starting the first task easier." :
     "You're often not finishing — shrink the plan down to 1–2 core tasks.";
 
-  function togglePref(key: "darkMode" | "suggestionsEnabled") {
+  function togglePref(key: "darkMode" | "suggestionsEnabled" | "gcalWriteBack") {
     if (!prefs) return;
     const updated = { ...prefs, [key]: !prefs[key] };
     setPrefs(updated);
@@ -257,7 +263,11 @@ export default function ProfilePage() {
       const accent = window.localStorage.getItem("openhour_accent_color_v1");
       if (accent) applyAccentDarkAttribute(accent);
     }
-    toast(key === "darkMode" ? (updated.darkMode ? "Dark mode on" : "Light mode on") : (updated.suggestionsEnabled ? "AI suggestions on" : "AI suggestions off"), "info");
+    const toastMsg =
+      key === "darkMode" ? (updated.darkMode ? "Dark mode on" : "Light mode on") :
+      key === "gcalWriteBack" ? (updated.gcalWriteBack ? "New blocks will sync to Google Calendar" : "Google Calendar write-back off") :
+      (updated.suggestionsEnabled ? "AI suggestions on" : "AI suggestions off");
+    toast(toastMsg, "info");
   }
 
   async function toggleNotifications() {
@@ -507,6 +517,35 @@ export default function ProfilePage() {
             </div>
             {prefs !== null && <Toggle enabled={prefs.notificationsEnabled ?? false} onToggle={toggleNotifications} />}
           </div>
+
+          {/* Google Calendar write-back — only shown when GCal is connected */}
+          {gcalConnected && (
+            <div className="ui-settings-row">
+              <div className="ui-settings-icon">📤</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-[var(--text-primary)]">Sync new blocks to Google</div>
+                <div className="text-xs text-[var(--text-faint)]">New OpenHour events are added to Google Calendar</div>
+              </div>
+              {prefs !== null && <Toggle enabled={prefs.gcalWriteBack ?? false} onToggle={() => togglePref("gcalWriteBack")} />}
+            </div>
+          )}
+
+          {/* Outlook Calendar — connection status indicator */}
+          {outlookConnected && (
+            <div className="ui-settings-row">
+              <div className="ui-settings-icon">
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded text-[9px] font-extrabold text-white" style={{ backgroundColor: "#0078d4" }}>M</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-[var(--text-primary)]">Outlook Calendar</div>
+                <div className="text-xs text-[var(--text-faint)]">Connected · events appear in your calendar view</div>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "#0078d4" }} />
+                <span className="text-xs font-semibold" style={{ color: "#0078d4" }}>Active</span>
+              </div>
+            </div>
+          )}
 
           {/* Cloud sync row — shows only when signed in */}
           {user && (
