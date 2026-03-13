@@ -1712,7 +1712,7 @@ function SuggestionInlineCards({
 // ─────────────────────────────────────────────────────────────
 // Missing Info Modal — beautiful, themed
 // ─────────────────────────────────────────────────────────────
-function MissingInfoModal({ open, onClose, onPickNext, onPickExact, eventTitle, prefillDate, prefillTime, prefillDuration, hideNextAvailable, queueInfo }: any) {
+function MissingInfoModal({ open, onClose, onPickNext, onPickExact, onAddToTodo, eventTitle, prefillDate, prefillTime, prefillDuration, hideNextAvailable, queueInfo }: any) {
   const [date, setDate] = useState(prefillDate ?? "");
   const [time, setTime] = useState(prefillTime ?? "12:00");
   const [durationHours, setDurationHours] = useState(() => Math.floor((prefillDuration ?? 60) / 60));
@@ -1869,13 +1869,24 @@ function MissingInfoModal({ open, onClose, onPickNext, onPickExact, eventTitle, 
             </button>
           </div>
 
-          {/* Cancel */}
-          <button
-            onClick={onClose}
-            className="w-full py-2 text-sm font-medium text-black/30 hover:text-black/55 transition-colors"
-          >
-            Cancel
-          </button>
+          {/* Add to To-Do / Cancel row */}
+          <div className="flex items-center justify-between gap-2 pt-1">
+            {onAddToTodo && (
+              <button
+                onClick={onAddToTodo}
+                className="flex items-center gap-1.5 rounded-xl border border-black/[0.08] bg-white px-4 py-2 text-sm font-semibold text-black/55 hover:bg-black/[0.04] transition-colors"
+                title="Not sure when? Save to To-Do list and drag onto the calendar later"
+              >
+                <span>📋</span> Add to To-Do
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="flex-1 py-2 text-sm font-medium text-black/30 hover:text-black/55 transition-colors text-right"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -5866,6 +5877,21 @@ export default function GeneratePage() {
         hideNextAvailable={!!pendingQuickEvent?.requiresTime}
         // Show progress indicator when processing a multi-event queue
         queueInfo={pendingQuickEvent?.isMultiEvent ? { remaining: multiEventQueue.length } : undefined}
+        onAddToTodo={pendingQuickEvent && !pendingQuickEvent.isMultiEvent ? () => {
+          const pe = pendingQuickEvent;
+          if (!pe?.title) return;
+          const todo: TodoItem = {
+            id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+            title: pe.title,
+            emoji: undefined,
+            durationMin: pe.durationMin ?? 60,
+            createdAt: new Date().toISOString(),
+          };
+          addTodoItem(todo);
+          setMissingInfoOpen(false);
+          setPendingQuickEvent(null);
+          toast(`📋 "${pe.title}" added to your To-Do list`, "success");
+        } : undefined}
         onClose={() => {
           setMissingInfoOpen(false);
           setPendingQuickEvent(null);
