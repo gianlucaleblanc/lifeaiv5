@@ -554,9 +554,10 @@ export default function CalendarPage() {
     const colW = (gridW - timeColPx) / visibleDays;
     const dayIdx = clamp(Math.floor(x / colW), 0, visibleDays - 1);
     const date = isoDateLocal(days[dayIdx]);
-    // Fix: account for scroll position so Y is correct even when scrolled down
-    const scrollTop = scrollEl.scrollTop;
-    const y = clamp(clientY - r.top + scrollTop, 0, gridHeightPx);
+    // clientY - r.top gives position relative to the scroll container's visible area.
+    // r is from getBoundingClientRect() which already reflects the current scroll position,
+    // so we do NOT add scrollTop here (that would double-count the scroll offset).
+    const y = clamp(clientY - r.top, 0, gridHeightPx);
     const mins = startHour * 60 + (y / hourRowPx) * 60;
     const snapped = Math.round(mins / stepMin) * stepMin;
     return { date, startMin: clamp(snapped, startHour * 60, endHour * 60) };
