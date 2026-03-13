@@ -356,6 +356,12 @@ export default function CalendarPage() {
   // Todo drag state: dragging a todo item onto the calendar grid
   const todoDragRef = useRef<{ id: string; title: string; durationMin: number; moved: boolean } | null>(null);
   const [todoDragPreview, setTodoDragPreview] = useState<{ date: string; startMin: number; endMin: number; title: string } | null>(null);
+  // Floating ghost chip: tracks raw cursor position so chip follows mouse anywhere on screen
+  const [todoCursorPos, setTodoCursorPos] = useState<{ x: number; y: number } | null>(null);
+  // Whether the cursor is hovering over the trash zone
+  const [overTrash, setOverTrash] = useState(false);
+  const overTrashRef = useRef(false); // ref so pointerup closure can read latest value
+  const trashRef = useRef<HTMLDivElement>(null);
   // viewMode: "week" | "agenda"
   const [viewMode, setViewMode] = useState<"week" | "agenda">("week");
   // detail card: shows quick-view before edit
@@ -389,6 +395,7 @@ export default function CalendarPage() {
   const [outlookLoading, setOutlookLoading] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const outerScrollRef = useRef<HTMLDivElement | null>(null); // the overflow-x:auto card wrapper
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ id: string; duration: number; offsetMin: number; moved: boolean } | null>(null);
 
@@ -546,17 +553,19 @@ export default function CalendarPage() {
   function persist(updated: CalendarBlock[]) { setItems(updated); }
 
   function pointerToSlot(clientX: number, clientY: number) {
-    const scrollEl = scrollRef.current, gridEl = bodyRef.current;
-    if (!scrollEl || !gridEl) return null;
-    const r = scrollEl.getBoundingClientRect();
+    const gridEl = bodyRef.current;
+    if (!gridEl) return null;
+    // Use bodyRef for bounds — it's the exact element containing the day columns and hour rows
+    const r = gridEl.getBoundingClientRect();
+    // Return null if the pointer is not over the grid body (allows caller to suppress ghost)
+    if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
     const gridW = gridEl.offsetWidth;
+    // X: subtract the time column width to get position within day columns
     const x = clamp(clientX - r.left - timeColPx, 0, gridW - timeColPx - 1);
     const colW = (gridW - timeColPx) / visibleDays;
     const dayIdx = clamp(Math.floor(x / colW), 0, visibleDays - 1);
     const date = isoDateLocal(days[dayIdx]);
-    // clientY - r.top gives position relative to the scroll container's visible area.
-    // r is from getBoundingClientRect() which already reflects the current scroll position,
-    // so we do NOT add scrollTop here (that would double-count the scroll offset).
+    // Y: clientY - r.top is already scroll-corrected (getBoundingClientRect is viewport-relative)
     const y = clamp(clientY - r.top, 0, gridHeightPx);
     const mins = startHour * 60 + (y / hourRowPx) * 60;
     const snapped = Math.round(mins / stepMin) * stepMin;
@@ -615,29 +624,76 @@ export default function CalendarPage() {
   const todoWindowDragMove = useRef<((e: PointerEvent) => void) | null>(null);
   const todoWindowDragUp = useRef<((e: PointerEvent) => void) | null>(null);
 
+  // Ref to hold latest todoDragPreview so the pointerup closure can read it without stale closure
+  const todoDragPreviewRef = useRef<{ date: string; startMin: number; endMin: number; title: string } | null>(null);
+
   function attachTodoDragListeners() {
     todoWindowDragMove.current = (e: PointerEvent) => {
       const d = todoDragRef.current;
       if (!d) return;
-      const slot = pointerToSlot(e.clientX, e.clientY);
-      if (!slot) return;
       d.moved = true;
+
+      // Update floating ghost position (follows cursor anywhere on screen)
+      setTodoCursorPos({ x: e.clientX, y: e.clientY });
+
+      // Check if hovering over trash zone
+      if (trashRef.current) {
+        const tr = trashRef.current.getBoundingClientRect();
+        const isOverTrash = e.clientX >= tr.left && e.clientX <= tr.right && e.clientY >= tr.top && e.clientY <= tr.bottom;
+        overTrashRef.current = isOverTrash;
+        setOverTrash(isOverTrash);
+        if (isOverTrash) {
+          setTodoDragPreview(null);
+          todoDragPreviewRef.current = null;
+          return;
+        }
+      }
+
+      // Only show grid ghost when pointer is over the scrollable grid area
+      const slot = pointerToSlot(e.clientX, e.clientY);
+      if (!slot) {
+        setTodoDragPreview(null);
+        todoDragPreviewRef.current = null;
+        return;
+      }
       const startMin = clamp(slot.startMin, startHour * 60, endHour * 60 - d.durationMin);
       const endMin = startMin + d.durationMin;
-      setTodoDragPreview({ date: slot.date, startMin, endMin, title: d.title });
+      const preview = { date: slot.date, startMin, endMin, title: d.title };
+      setTodoDragPreview(preview);
+      todoDragPreviewRef.current = preview;
     };
     todoWindowDragUp.current = () => {
       detachTodoDragListeners();
       const d = todoDragRef.current;
-      if (!d || !todoDragPreview || !d.moved) {
+      setTodoCursorPos(null);
+
+      // Check trash drop
+      if (d && overTrashRef.current) {
         todoDragRef.current = null;
         setTodoDragPreview(null);
+        todoDragPreviewRef.current = null;
+        overTrashRef.current = false;
+        setOverTrash(false);
+        const updated = deleteTodoItem(d.id);
+        setTodos(updated);
+        toast(`🗑️ "${d.title}" deleted`, "info");
         return;
       }
-      const { date, startMin, endMin } = todoDragPreview;
+      overTrashRef.current = false;
+      setOverTrash(false);
+
+      const preview = todoDragPreviewRef.current;
+      if (!d || !preview || !d.moved) {
+        todoDragRef.current = null;
+        setTodoDragPreview(null);
+        todoDragPreviewRef.current = null;
+        return;
+      }
+      const { date, startMin, endMin } = preview;
       const id = d.id;
       todoDragRef.current = null;
       setTodoDragPreview(null);
+      todoDragPreviewRef.current = null;
 
       // Remove from todo list, add to calendar
       const { todo } = scheduleTodoItem(id, date, startMin, endMin);
@@ -1154,7 +1210,7 @@ export default function CalendarPage() {
               })()}
 
               {/* Outer card — overflow-x scroll so columns never squish below minDayColPx */}
-              <div className="rounded-2xl overflow-x-auto overflow-y-hidden" style={{ border: "1px solid var(--divider)", background: "var(--surface-raised)", boxShadow: "var(--shadow-sm)" }}>
+              <div ref={outerScrollRef} className="rounded-2xl overflow-x-auto overflow-y-hidden" style={{ border: "1px solid var(--divider)", background: "var(--surface-raised)", boxShadow: "var(--shadow-sm)" }}>
                 {/* Inner min-width wrapper so the grid can exceed the card width */}
                 <div
                   ref={scrollRef}
@@ -1664,6 +1720,50 @@ export default function CalendarPage() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* ── Drag: floating ghost chip that follows the cursor anywhere on screen ── */}
+      {todoCursorPos && todoDragRef.current && (
+        <div
+          className="pointer-events-none fixed z-[9999] select-none"
+          style={{
+            left: todoCursorPos.x + 12,
+            top: todoCursorPos.y - 16,
+            transform: "rotate(-2deg)",
+          }}
+        >
+          <div className={`flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm font-semibold shadow-xl border
+            ${overTrash
+              ? "bg-red-50 border-red-300 text-red-600 scale-110"
+              : "bg-white border-emerald-200 text-emerald-700"
+            }`}
+            style={{ transition: "background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s", boxShadow: overTrash ? "0 8px 24px rgba(239,68,68,0.25)" : "0 8px 24px rgba(0,0,0,0.15)" }}
+          >
+            <span>{overTrash ? "🗑️" : "📋"}</span>
+            <span className="max-w-[140px] truncate">{todoDragRef.current.title}</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Drag: trash zone — appears at bottom-center when dragging a todo ── */}
+      {todoCursorPos && (
+        <div
+          ref={trashRef}
+          className="pointer-events-none fixed bottom-8 left-1/2 z-[9998] -translate-x-1/2"
+          style={{ transition: "opacity 0.2s, transform 0.2s" }}
+        >
+          <div className={`flex flex-col items-center gap-1 rounded-2xl border-2 px-6 py-3 backdrop-blur-sm transition-all duration-150
+            ${overTrash
+              ? "border-red-400 bg-red-50/95 shadow-[0_8px_32px_rgba(239,68,68,0.3)] scale-110"
+              : "border-red-200/70 bg-white/80 shadow-[0_4px_20px_rgba(0,0,0,0.12)]"
+            }`}
+          >
+            <span className={`text-2xl transition-transform duration-150 ${overTrash ? "scale-125" : ""}`}>🗑️</span>
+            <span className={`text-[11px] font-bold tracking-wide transition-colors duration-150 ${overTrash ? "text-red-500" : "text-black/30"}`}>
+              {overTrash ? "Release to delete" : "Drop to delete"}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
